@@ -9,6 +9,12 @@ Main features:
 
 I tried using nix-darwin and NixOS, but at the moment they don't bring much value to me. I work with Python a lot, in various team structures, and for now I want to keep using regular virtual environments for my Python projects, which seems like a hassle in NixOS. Thanks to nix-darwin I can now do sudo using Touch ID on my Macbook, but I don't use it for much else.
 
+## Note to self: adding a new linux machine
+```
+nix --experimental-features 'nix-command flakes' run home-manager/master -- --experimental-features 'nix-command flakes' switch --flake .#simon-linux
+atuin login
+```
+
 ## Very basic steps to set this up yourself
 
 Setting this up can be a bit confusing. Nix will build all of its own packages in `/nix` and symlink them to the right place. It will also create config files like "~/.zshrc". The nix language is often described as "json with functions". The docs and examples can sometimes be confusing. For me the deterministic and portable nature of my home directory is worth the learning curve. It's quite a cool system!
