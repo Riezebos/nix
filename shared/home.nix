@@ -1,4 +1,8 @@
-{pkgs, ...}: {
+{
+  pkgs,
+  lib,
+  ...
+}: {
   home.username = "simon";
 
   programs = {
@@ -499,7 +503,7 @@
         ignoreAllDups = true;
         ignoreSpace = false;
       };
-      initExtra = ''
+      initExtra = lib.mkAfter ''
         export PATH="$HOME/.cargo/bin:$PATH"
         export PATH="$HOME/repos/experiments/flutter/bin:$PATH"
         export GEM_HOME=$HOME/.gem
@@ -515,6 +519,15 @@
         export LC_ALL="en_US.UTF-8"
         export LANGUAGE="en_US.UTF-8"
 
+        _zsh_autosuggest_strategy_atuin_auto() {
+            suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
+        }
+
+        _zsh_autosuggest_strategy_atuin_global() {
+            suggestion=$(atuin search --cmd-only --limit 1 --search-mode prefix -- "$1")
+        }
+        export ZSH_AUTOSUGGEST_STRATEGY=(atuin_auto atuin_global)
+
         pip() {
             if ! type -P pip &> /dev/null
             then
@@ -526,21 +539,8 @@
 
         bindkey "^ " autosuggest-accept
         test -e "$HOME/.iterm2_shell_integration.zsh" && source "$HOME/.iterm2_shell_integration.zsh"
-
-        _zsh_autosuggest_strategy_atuin_auto() {
-            suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
-        }
-
-        _zsh_autosuggest_strategy_atuin_global() {
-            suggestion=$(atuin search --cmd-only --limit 1 --search-mode prefix -- "$1")
-        }
-
-        function my_precmd() {
-          export ZSH_AUTOSUGGEST_STRATEGY=(atuin_auto atuin_global)
-        }
-        autoload -U add-zsh-hook
-        add-zsh-hook precmd my_precmd
       '';
+
       shellAliases = {
         venv = "source .venv/bin/activate";
         helpme = "tldr --list | fzf | xargs tldr";
