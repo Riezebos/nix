@@ -566,9 +566,10 @@
 
   home.packages = with pkgs; [
     alejandra
-    (azure-cli.withExtensions [
-      azure-cli.extensions.azure-devops
-    ])
+    # No idea how to get the az ml extension to work
+    # (azure-cli.withExtensions [
+    #   azure-cli.extensions.azure-devops
+    # ])
     curl
     ffmpeg
     fzf
