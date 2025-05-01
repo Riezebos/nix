@@ -582,7 +582,7 @@
     nerd-fonts.fantasque-sans-mono
     nil
     rsync
-    nodejs
+    devenv
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
