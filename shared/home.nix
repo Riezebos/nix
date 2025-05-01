@@ -503,7 +503,7 @@
         ignoreAllDups = true;
         ignoreSpace = false;
       };
-      initExtra = lib.mkAfter ''
+      initContent = lib.mkAfter ''
         export PATH="$HOME/.cargo/bin:$PATH"
         export PATH="$HOME/repos/experiments/flutter/bin:$PATH"
         export GEM_HOME=$HOME/.gem
