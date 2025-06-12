@@ -45,6 +45,7 @@
   # };
 
   nix = {
+    enable = true;
     # update nix to the latest version
     package = pkgs.nix;
 
@@ -68,39 +69,36 @@
   # hostplatform is just macbook for now
   nixpkgs.hostPlatform = "aarch64-darwin";
 
-  # enable nix-daemon
-  services.nix-daemon.enable = true;
-
   # enable sudo with touch id
-  security.pam.enableSudoTouchIdAuth = true;
+  security.pam.services.sudo_local.touchIdAuth = true;
 
   # set some system defaults
   system = {
-    defaults = {
-      dock.autohide = true;
-      # dock.largesize = 64;
-      # dock.persistent-apps = [
-      #   "${pkgs.alacritty}/Applications/Alacritty.app"
-      #   "/Applications/Firefox.app"
-      #   "${pkgs.obsidian}/Applications/Obsidian.app"
-      #   "/System/Applications/Mail.app"
-      #   "/System/Applications/Calendar.app"
-      # ];
-      # finder.FXPreferredViewStyle = "clmv";
-      loginwindow.GuestEnabled = false;
-      NSGlobalDomain.AppleICUForce24HourTime = true;
-      # NSGlobalDomain.AppleInterfaceStyle = "Dark";
-      NSGlobalDomain.KeyRepeat = 2;
-    };
+    #   defaults = {
+    # dock.autohide = true;
+    # dock.largesize = 64;
+    # dock.persistent-apps = [
+    #   "${pkgs.alacritty}/Applications/Alacritty.app"
+    #   "/Applications/Firefox.app"
+    #   "${pkgs.obsidian}/Applications/Obsidian.app"
+    #   "/System/Applications/Mail.app"
+    #   "/System/Applications/Calendar.app"
+    # ];
+    # finder.FXPreferredViewStyle = "clmv";
+    # loginwindow.GuestEnabled = false;
+    # NSGlobalDomain.AppleICUForce24HourTime = true;
+    # NSGlobalDomain.AppleInterfaceStyle = "Dark";
+    # NSGlobalDomain.KeyRepeat = 2;
+    # };
 
     # Used for backwards compatibility, please read the changelog before changing.
     # $ darwin-rebuild changelog
     stateVersion = 5;
-    activationScripts.postUserActivation.text = ''
-      # activateSettings -u will reload the settings from the database and apply them to the current session,
-      # so we do not need to logout and login again to make the changes take effect.
-      /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
-    '';
+    # activationScripts.postUserActivation.text = ''
+    #   # activateSettings -u will reload the settings from the database and apply them to the current session,
+    #   # so we do not need to logout and login again to make the changes take effect.
+    #   /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
+    # '';
 
     # below is needed for Spotlight but Raycast is smart enough to read symlinks
     # activationScripts.applications.text = let
