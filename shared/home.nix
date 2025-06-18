@@ -1,10 +1,9 @@
 {
   pkgs,
   lib,
+  config,
   ...
 }: {
-  home.username = "simon";
-
   programs = {
     awscli.enable = true;
     atuin = {
@@ -19,7 +18,7 @@
         show_tabs = false;
         ctrl_n_shortcuts = true;
         sync = {
-          records = true;
+          records = config.home.username != "simon.riezebos";
         };
       };
     };
@@ -31,6 +30,9 @@
       silent = true;
       config = {
         global.load_dotenv = true;
+        whitelist.prefix = [
+          "${config.home.homeDirectory}/repos"
+        ];
       };
     };
     eza = {
@@ -58,7 +60,6 @@
       lfs.enable = true;
 
       userName = "Simon Riezebos";
-      userEmail = "info@datagiant.org";
       extraConfig = {
         init.defaultBranch = "main";
         rerere.enabled = true;
@@ -74,189 +75,16 @@
       ];
       includes = [
         {
+          path = "~/repos/.gitconfig";
+          condition = "gitdir:~/repos/";
+        }
+        {
           path = "~/repos/volt/.gitconfig";
           condition = "gitdir:~/repos/volt/";
         }
       ];
     };
     jq.enable = true;
-    # starship = {
-    #   enable = true;
-    #   settings = {
-    #     command_timeout = 10000;
-    #     add_newline = true;
-    #     line_break.disabled = false;
-
-    #     format = lib.strings.concatStrings [
-    #       "$hostname"
-    #       "[](#DA627D)"
-    #       "$directory"
-    #       "[](fg:#DA627D bg:#FCA17D)"
-    #       "$git_branch"
-    #       "$git_status"
-    #       "[](fg:#FCA17D bg:#86BBD8)"
-    #       "$python"
-    #       "$conda"
-    #       "$terraform"
-    #       "$c"
-    #       "$elixir"
-    #       "$elm"
-    #       "$golang"
-    #       "$gradle"
-    #       "$haskell"
-    #       "$java"
-    #       "$julia"
-    #       "$nodejs"
-    #       "$nim"
-    #       "$rust"
-    #       "$scala"
-    #       "[](fg:#86BBD8 bg:#06969A)"
-    #       "$cmd_duration"
-    #       "[](#06969A)"
-    #       "\n$character"
-    #     ];
-
-    #     aws.disabled = true;
-    #     gcloud.disabled = true;
-
-    #     cmd_duration.format = "[⏲ $duration]($style)";
-    #     cmd_duration.style = "bg:#06969a";
-
-    #     username = {
-    #       show_always = false;
-    #       style_user = "bg:#9a348e";
-    #       style_root = "bg:#9a348e";
-    #       format = "[ $user ]($style)";
-    #       disabled = true;
-    #     };
-
-    #     directory = {
-    #       style = "bg:#DA627D";
-    #       format = "[ $path ]($style)";
-    #       substitutions = {
-    #         "Documents" = "󰈙 ";
-    #         "Downloads" = " ";
-    #         "Music" = " ";
-    #         "Pictures" = " ";
-    #       };
-    #     };
-
-    #     c = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     docker_context = {
-    #       symbol = " ";
-    #       style = "bg:#06969A";
-    #       format = "[ $symbol $context ]($style) $path";
-    #     };
-
-    #     elixir = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     elm = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     git_branch = {
-    #       symbol = " ";
-    #       style = "bg:#FCA17D";
-    #       format = "[$symbol$branch ]($style)";
-    #     };
-
-    #     git_status = {
-    #       style = "bg:#FCA17D";
-    #       format = "[$all_status$ahead_behind]($style)";
-    #       ahead = "⇡$count";
-    #       diverged = "⇡$ahead_count⇣$behind_count";
-    #       behind = "⇣$count";
-    #       conflicted = "≠";
-    #       up_to_date = "✓";
-    #       untracked = "…";
-    #       stashed = "⚑";
-    #       modified = "+";
-    #     };
-
-    #     golang = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     gradle = {
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     haskell = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     hostname = {
-    #       ssh_only = true;
-    #       format = "[$ssh_symbol$hostname ]($style)";
-    #       ssh_symbol = "🌐";
-    #     };
-
-    #     java = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     julia = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     python = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol$pyenv_prefix($version) ($virtualenv)]($style)";
-    #     };
-
-    #     nodejs = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version)]($style)";
-    #     };
-
-    #     nim = {
-    #       symbol = "󰆥 ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     rust = {
-    #       symbol = "";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     scala = {
-    #       symbol = " ";
-    #       style = "bg:#86BBD8";
-    #       format = "[$symbol($version) ]($style)";
-    #     };
-
-    #     time = {
-    #       disabled = false;
-    #       time_format = "%R";
-    #       style = "bg:#33658A";
-    #       format = "[ ♥ $time ]($style)";
-    #     };
-    #   };
-    # };
     oh-my-posh = {
       enable = true;
       useTheme = "powerlevel10k_rainbow";
