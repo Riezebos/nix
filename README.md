@@ -9,6 +9,11 @@ Main features:
 
 I tried using nix-darwin and NixOS, but at the moment they don't bring much value to me. I work with Python a lot, in various team structures, and for now I want to keep using regular virtual environments for my Python projects, which seems like a hassle in NixOS. Thanks to nix-darwin I can now do sudo using Touch ID on my Macbook, but I don't use it for much else.
 
+## Note to self: adding a new mac machine (with Determinate nix)
+```
+nix run home-manager/master -- switch --flake .#simon-m4
+```
+
 ## Note to self: adding a new linux machine
 ```
 nix --experimental-features 'nix-command flakes' run home-manager/master -- --experimental-features 'nix-command flakes' switch --flake .#simon-linux

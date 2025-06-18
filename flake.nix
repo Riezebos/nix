@@ -27,7 +27,18 @@
         modules = [
           ./shared/home.nix
           {
+            home.username = "simon";
             home.homeDirectory = "/Users/simon";
+          }
+        ];
+      };
+      "simon-m4" = home-manager.lib.homeManagerConfiguration {
+        pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+        modules = [
+          ./shared/home.nix
+          {
+            home.username = "simon.riezebos";
+            home.homeDirectory = "/Users/simon.riezebos";
           }
         ];
       };
@@ -36,6 +47,7 @@
         modules = [
           ./shared/home.nix
           {
+            home.username = "simon";
             home.homeDirectory = "/home/simon";
           }
         ];
