@@ -338,6 +338,7 @@
         export PATH=$GEM_HOME/bin:$PATH
         export PATH="$HOME/.gem/ruby/3.3.0/bin:$PATH"
         export PATH="$HOME/.local/bin:$PATH"
+        export PATH="$HOME/.rd/bin:$PATH"
 
         export PIP_REQUIRE_VIRTUALENV=1
         export PIP_USE_PEP517=1
