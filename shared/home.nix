@@ -27,7 +27,6 @@
     btop.enable = true;
     direnv = {
       enable = true;
-      silent = true;
       config = {
         global.load_dotenv = true;
         whitelist.prefix = [
@@ -412,6 +411,7 @@
     nil
     rsync
     devenv
+    nodejs_22
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
