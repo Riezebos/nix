@@ -332,10 +332,6 @@
       };
       initContent = lib.mkAfter ''
         export PATH="$HOME/.cargo/bin:$PATH"
-        export PATH="$HOME/repos/experiments/flutter/bin:$PATH"
-        export GEM_HOME=$HOME/.gem
-        export PATH=$GEM_HOME/bin:$PATH
-        export PATH="$HOME/.gem/ruby/3.3.0/bin:$PATH"
         export PATH="$HOME/.local/bin:$PATH"
         export PATH="$HOME/.rd/bin:$PATH"
 
@@ -364,6 +360,8 @@
                 command pip "$@"
             fi
         }
+
+        [[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm"
 
         bindkey "^ " autosuggest-accept
         test -e "$HOME/.iterm2_shell_integration.zsh" && source "$HOME/.iterm2_shell_integration.zsh"
