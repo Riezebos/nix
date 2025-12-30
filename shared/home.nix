@@ -58,8 +58,8 @@
       enable = true;
       lfs.enable = true;
 
-      userName = "Simon Riezebos";
-      extraConfig = {
+      settings = {
+        user.name = "Simon Riezebos";
         init.defaultBranch = "main";
         rerere.enabled = true;
         pull.rebase = true;
