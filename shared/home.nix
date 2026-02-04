@@ -1,5 +1,6 @@
 {
   pkgs,
+  flake,
   lib,
   config,
   ...
@@ -427,6 +428,7 @@
   nix = {
     package = pkgs.nix;
     settings.experimental-features = ["nix-command" "flakes"];
+    registry.nixpkgs.flake = flake.inputs.nixpkgs;
   };
 
   # below is needed for Spotlight but Raycast is smart enough to read symlinks
