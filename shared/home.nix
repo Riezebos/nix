@@ -407,7 +407,7 @@
     nil
     rsync
     devenv
-    nodejs_22
+    nodejs_24
     glab
   ];
 
