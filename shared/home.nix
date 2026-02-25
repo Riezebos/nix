@@ -374,6 +374,19 @@
         ur = "uv run";
         hm-mac = "home-manager switch --flake /Users/simon/repos/nix#simon-darwin";
         hm-pega = "ssh pegalite 'source /etc/bashrc && cd ~/repos/nix && git pull && home-manager switch --flake ~/repos/nix#simon-linux'";
+
+        #git
+        gcl = "git clone";
+        gpl = "git pull";
+        gp = "git push";
+        gpf = "git push --force";
+        gcm = "git commit -m";
+        gf = "git fetch --all --prune";
+        gst = "git stash";
+        gstp = "git stash pop";
+        gsw = "git switch";
+        gswc = "git switch -c";
+        gswm = "git switch main";
       };
       plugins = [
         {
