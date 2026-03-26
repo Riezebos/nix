@@ -423,6 +423,7 @@
     devenv
     nodejs_24
     glab
+    crane
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
