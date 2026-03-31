@@ -424,6 +424,7 @@
     nodejs_24
     glab
     crane
+    cachix
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
