@@ -425,6 +425,7 @@
     glab
     crane
     cachix
+    gh
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
