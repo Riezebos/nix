@@ -1,0 +1,11 @@
+keys:
+  - &simon age15ranv8ucwney4fu4z7hn4y9nuaym3lt083738yszh6mtddnsdy0qqa3u65
+  # Foundry server host key (added during Phase 2 after first install):
+  # - &foundry ageXXXXX...
+
+creation_rules:
+  - path_regex: modules/hosts/foundry/secrets\.ya?ml$
+    key_groups:
+      - age:
+          - *simon
+          # - *foundry
