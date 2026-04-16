@@ -71,6 +71,13 @@
       port = 2222;
       hostKeys = ["/etc/secrets/initrd/ssh_host_ed25519_key"];
       authorizedKeys = config.users.users.simon.openssh.authorizedKeys.keys;
+      # Drop the SSH session straight into the LUKS passphrase prompt instead
+      # of a root shell. Without this, systemd-initrd leaves you at `ash` and
+      # you have to run `systemd-tty-ask-password-agent` by hand. The binary is
+      # available in initrd PATH; `--query` answers all pending prompts and exits.
+      extraConfig = ''
+        ForceCommand systemd-tty-ask-password-agent --query
+      '';
     };
     # Intel I219-LM onboard NIC. Confirm from the generated
     # hosts/foundry/hardware-configuration.nix after first install and adjust
@@ -94,13 +101,15 @@
       ];
     };
 
-    # deploy-rs target user (Phase 3b). Add the generated deploy public key
-    # here when Phase 3b starts.
+    # Dedicated activation user. Used by `nixos-rebuild --target-host` from the
+    # laptop today, and by deploy-rs / CI once Phase 3b lands. The matching
+    # private key lives at ~/.config/foundry-bootstrap/deploy_ed25519 on the
+    # laptop; add it as a GitHub Actions secret during Phase 3b.
     users.users.deploy = {
       isNormalUser = true;
       extraGroups = ["wheel"];
       openssh.authorizedKeys.keys = [
-        # TODO(phase-3b): add deploy-rs CI public key
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFS7GObQq49TYnrSmYBKp6hfVaVw2w0wroMsA1w2HNd3 foundry-deploy"
       ];
     };
 
