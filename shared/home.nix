@@ -426,6 +426,9 @@
     crane
     cachix
     gh
+    sops
+    age
+    ssh-to-age
   ];
 
   home.file.".ipython/profile_default/ipython_config.py".text = ''
