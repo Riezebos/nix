@@ -363,6 +363,67 @@
               fi
           }
 
+          # Foundry (Hetzner) LUKS unlock helpers.
+          # Seed the macOS Keychain once:
+          #     foundry-unlock-seed
+          # Then, after a reboot, unlock the server in one step:
+          #     foundry-unlock
+          #
+          # The initrd sshd uses `ForceCommand systemd-tty-ask-password-agent --query`,
+          # which reads the passphrase from /dev/tty. `ssh -tt` forces pty allocation
+          # so the piped stdin is fed into the pty that the agent reads from.
+          foundry-unlock() {
+              emulate -L zsh
+              local host=foundry
+              local pw rc
+              if nc -z -G 2 "$host" 22 >/dev/null 2>&1; then
+                  print "foundry: already up (port 22 open). Nothing to do."
+                  return 0
+              fi
+              if ! pw=$(security find-generic-password -a foundry -s foundry-luks -w 2>/dev/null); then
+                  print -u2 "foundry-unlock: keychain item 'foundry-luks' not found."
+                  print -u2 "  Seed it once with: foundry-unlock-seed"
+                  return 1
+              fi
+              print "foundry: sending passphrase to initrd on $host:2222..."
+              printf '%s\n' "$pw" | ssh -tt -p 2222 \
+                  -o IdentitiesOnly=yes \
+                  -o ConnectTimeout=10 \
+                  -o ServerAliveInterval=5 \
+                  -o StrictHostKeyChecking=accept-new \
+                  "root@$host" >/dev/null 2>&1
+              rc=$?
+              pw=""
+              if [[ $rc -ne 0 ]]; then
+                  print -u2 "foundry-unlock: ssh to initrd returned $rc (wrong passphrase? initrd not up?)"
+                  return $rc
+              fi
+              print "foundry: passphrase accepted, waiting for sshd on :22..."
+              local i
+              for i in $(seq 1 60); do
+                  if nc -z -G 2 "$host" 22 >/dev/null 2>&1; then
+                      print "foundry: up."
+                      return 0
+                  fi
+                  sleep 2
+              done
+              print -u2 "foundry: port 22 still closed after 120s — check the console."
+              return 2
+          }
+
+          foundry-unlock-seed() {
+              print "Storing LUKS passphrase for foundry in the login keychain."
+              print "(Input is hidden; you will be prompted once.)"
+              security add-generic-password \
+                  -a foundry \
+                  -s foundry-luks \
+                  -l "Foundry LUKS passphrase" \
+                  -D "LUKS passphrase" \
+                  -j "Used by foundry-unlock zsh function" \
+                  -U \
+                  -w
+          }
+
           bindkey "^ " autosuggest-accept
           test -e "$HOME/.iterm2_shell_integration.zsh" && source "$HOME/.iterm2_shell_integration.zsh"
         '';
