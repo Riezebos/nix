@@ -148,6 +148,22 @@
       interfaces."nb-foundry".allowedTCPPorts = [22];
     };
 
+    # Phase 1c: unattended security updates. `operation = "boot"` stages
+    # new generations into the bootloader without activating immediately,
+    # so openssh/nginx don't restart mid-session — the next reboot picks
+    # the new generation up. No `--update-input nixpkgs` here: the server
+    # is a puller, the laptop (and later CI in Phase 3c) is the authority
+    # on what's in flake.lock. When Phase 3c lands and CI starts bumping
+    # the lock weekly, this stays unchanged.
+    system.autoUpgrade = {
+      enable = true;
+      flake = "github:Riezebos/nix";
+      flags = ["-L"];
+      dates = "04:30";
+      randomizedDelaySec = "45min";
+      operation = "boot";
+    };
+
     users.users.simon = {
       isNormalUser = true;
       extraGroups = ["wheel"];
