@@ -1,11 +1,17 @@
 keys:
+  # Personal age key on the laptop (~/.config/sops/age/keys.txt).
   - &simon age15ranv8ucwney4fu4z7hn4y9nuaym3lt083738yszh6mtddnsdy0qqa3u65
-  # Foundry server host key (added during Phase 2 after first install):
-  # - &foundry ageXXXXX...
+
+  # foundry's ssh_host_ed25519_key, converted via `ssh-to-age`. The server
+  # decrypts its own secrets at activation time via
+  #   sops.age.sshKeyPaths = ["/etc/ssh/ssh_host_ed25519_key"];
+  # Do NOT use sops' upstream native SSH-key support — it derives a different
+  # age key and silently fails to decrypt (sops-nix#824).
+  - &foundry age10rnh6wj3jl0ukxs6v40xgznt9amr6pwkg02pjtvfvnee97a3xvnshmuhky
 
 creation_rules:
-  - path_regex: modules/hosts/foundry/secrets\.ya?ml$
+  - path_regex: modules/hosts/foundry/secrets\.yaml$
     key_groups:
       - age:
           - *simon
-          # - *foundry
+          - *foundry

@@ -129,9 +129,15 @@
 
     # sops-nix: use the server's SSH ed25519 host key as the age decryption
     # key. The default `sops.age.sshKeyPaths` already points here, but being
-    # explicit makes it less surprising.
+    # explicit makes it less surprising. The corresponding age recipient
+    # (derived via `ssh-to-age`) lives in `.sops.yaml` at the repo root.
     sops.age.sshKeyPaths = ["/etc/ssh/ssh_host_ed25519_key"];
-    # sops.defaultSopsFile gets set in Phase 2 once secrets.yaml exists.
+    sops.defaultSopsFile = ./secrets.yaml;
+
+    # Phase 2 smoke-test secret. After activation, `cat /run/secrets/test`
+    # as root should print "hello from sops-nix". Remove once we have a
+    # real secret referencing `secrets.yaml`.
+    sops.secrets.test = {};
 
     # Must be set to the first NixOS release installed on this machine.
     # Do not change without reading the NixOS release notes.
