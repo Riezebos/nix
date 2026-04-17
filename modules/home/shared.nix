@@ -369,14 +369,23 @@
           # Then, after a reboot, unlock the server in one step:
           #     foundry-unlock
           #
+          # Requires a `Host foundry` entry in ~/.ssh/config — the IP is looked
+          # up via `ssh -G` so it never appears in this (public) repo.
+          #
           # The initrd sshd uses `ForceCommand systemd-tty-ask-password-agent --query`,
           # which reads the passphrase from /dev/tty. `ssh -tt` forces pty allocation
           # so the piped stdin is fed into the pty that the agent reads from.
           foundry-unlock() {
               emulate -L zsh
-              local host=foundry
-              local pw rc
-              if nc -z -G 2 "$host" 22 >/dev/null 2>&1; then
+              local ssh_host=foundry
+              local ip pw rc
+              ip=$(ssh -G "$ssh_host" 2>/dev/null | awk '/^hostname /{print $2; exit}')
+              if [[ -z "$ip" || "$ip" == "$ssh_host" ]]; then
+                  print -u2 "foundry-unlock: '$ssh_host' is not configured in ~/.ssh/config."
+                  print -u2 "  Add a 'Host foundry' block with HostName set to the server IP."
+                  return 1
+              fi
+              if nc -z -G 2 "$ip" 22 >/dev/null 2>&1; then
                   print "foundry: already up (port 22 open). Nothing to do."
                   return 0
               fi
@@ -385,13 +394,13 @@
                   print -u2 "  Seed it once with: foundry-unlock-seed"
                   return 1
               fi
-              print "foundry: sending passphrase to initrd on $host:2222..."
+              print "foundry: sending passphrase to initrd on $ssh_host:2222..."
               printf '%s\n' "$pw" | ssh -tt -p 2222 \
                   -o IdentitiesOnly=yes \
                   -o ConnectTimeout=10 \
                   -o ServerAliveInterval=5 \
                   -o StrictHostKeyChecking=accept-new \
-                  "root@$host" >/dev/null 2>&1
+                  "root@$ssh_host" >/dev/null 2>&1
               rc=$?
               pw=""
               if [[ $rc -ne 0 ]]; then
@@ -401,7 +410,7 @@
               print "foundry: passphrase accepted, waiting for sshd on :22..."
               local i
               for i in $(seq 1 60); do
-                  if nc -z -G 2 "$host" 22 >/dev/null 2>&1; then
+                  if nc -z -G 2 "$ip" 22 >/dev/null 2>&1; then
                       print "foundry: up."
                       return 0
                   fi

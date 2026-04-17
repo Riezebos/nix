@@ -1,9 +1,10 @@
 # foundry bootstrap notes
 
 Working session notes from the first `nixos-anywhere` install onto the Hetzner
-box `foundry` (hostname `foundry`). Written during Phase 1 of
-`PLAN.md`; meant to be merged into/superseded by `BOOTSTRAP.md` (Phase 5,
-step 11) once the plan is further along.
+box (hostname `foundry`; real IP lives in `~/.ssh/config` under `Host foundry`
+on the laptop, intentionally kept out of this public repo). Written during
+Phase 1 of `PLAN.md`; meant to be merged into/superseded by `BOOTSTRAP.md`
+(Phase 5, step 11) once the plan is further along.
 
 ## Current state
 

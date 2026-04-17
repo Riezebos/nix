@@ -1,0 +1,5 @@
+.direnv/
+result
+result-*
+# auto-generated symlink into the nix store on devShell entry (git-hooks.nix)
+.pre-commit-config.yaml
