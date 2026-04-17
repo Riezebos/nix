@@ -84,15 +84,20 @@
     # if the detected driver differs.
     boot.initrd.availableKernelModules = ["e1000e"];
 
+    # Public SSH is closed by the explicit `networking.firewall` allow-list
+    # below; openFirewall = false stops the openssh module from adding port
+    # 22 to allowedTCPPorts (which would undo that). Port 22 is opened only
+    # on the netbird mesh interface further down.
     services.openssh = {
       enable = true;
+      openFirewall = false;
       settings = {
         PasswordAuthentication = false;
         PermitRootLogin = "no";
         KbdInteractiveAuthentication = false;
-        # Phase 1c: tighten brute-force surface. The firewall cutover in a
-        # follow-up commit will close public SSH entirely; these settings
-        # harden the window in between. AllowUsers matches the two real
+        # Phase 1c: tighten brute-force surface. The firewall cutover in this
+        # commit closes public SSH entirely; these auth settings harden the
+        # brief window during earlier steps. AllowUsers matches the two real
         # accounts on this box.
         MaxAuthTries = 3;
         AllowUsers = ["simon" "deploy"];
@@ -125,6 +130,23 @@
     #                              without a valid key, so not a new
     #                              attack surface)
     services.netbird.clients.foundry.port = 51820;
+
+    # Phase 1c firewall cutover. Explicit allow-list, not "defaults plus
+    # openFirewall toggles". After activation:
+    #   - Public TCP: only port 2222 (initrd LUKS unlock — must stay public,
+    #     the netbird client can't run before root FS is decrypted).
+    #   - Public UDP: 51820 (added automatically by the netbird client module
+    #     for direct peer-to-peer). If you ever want to force all mesh
+    #     traffic through netbird's relays instead, set
+    #     services.netbird.clients.foundry.openFirewall = false.
+    #   - Mesh-only: real SSH (port 22) on the nb-foundry interface. The
+    #     netbird module also auto-adds 5353/udp and 22054/udp on nb-foundry
+    #     for its DNS forwarder; our entry merges with those.
+    networking.firewall = {
+      enable = true;
+      allowedTCPPorts = [2222];
+      interfaces."nb-foundry".allowedTCPPorts = [22];
+    };
 
     users.users.simon = {
       isNormalUser = true;
