@@ -90,8 +90,43 @@
         PasswordAuthentication = false;
         PermitRootLogin = "no";
         KbdInteractiveAuthentication = false;
+        # Phase 1c: tighten brute-force surface. The firewall cutover in a
+        # follow-up commit will close public SSH entirely; these settings
+        # harden the window in between. AllowUsers matches the two real
+        # accounts on this box.
+        MaxAuthTries = 3;
+        AllowUsers = ["simon" "deploy"];
       };
     };
+
+    # Phase 1c: Netbird mesh client. The laptop is already on the mesh via
+    # the macOS GUI client; this brings foundry on too. Interactive enrollment
+    # is a one-shot `sudo netbird-foundry up` from the server after first
+    # activation — prints an SSO URL to open on the laptop.
+    #
+    # Package pinned to the rolling `nixpkgs-devenv` channel instead of the
+    # 25.11 stable's netbird 0.60.2. Rationale: netbird releases every few
+    # days and 25.11's pin sits ~7 minor versions behind upstream (DNS-in-
+    # userspace-WG fix, NAT-PMP/UPnP for better hole-punching, gRPC retry
+    # stability fixes, all landed post-0.60.2). For a networking/security
+    # tool where the upstream moves this fast, stale-by-half-a-year is the
+    # bigger risk than occasional rolling-channel surprises — and the server
+    # only picks up a new netbird when flake.lock is bumped and pushed, same
+    # cadence as everything else. Only this *package* is on rolling; the
+    # NixOS module (systemd hardening, polkit rules, preStart config merge)
+    # stays on 25.11. If you're tempted to do this override for nginx /
+    # postgresql / openssh too: don't — those want stable's long-tail.
+    services.netbird.package = inputs.nixpkgs-devenv.legacyPackages.${pkgs.stdenv.hostPlatform.system}.netbird;
+
+    # Defaults we're deliberately accepting:
+    #   interface = "nb-foundry"   (module default: "nb-${name}")
+    #   hardened = true            (dedicated system user, minimal caps)
+    #   openFirewall = true        (adds 51820/udp to public firewall
+    #                              for direct peer-to-peer hole-punching;
+    #                              WireGuard's crypto rejects anything
+    #                              without a valid key, so not a new
+    #                              attack surface)
+    services.netbird.clients.foundry.port = 51820;
 
     users.users.simon = {
       isNormalUser = true;
