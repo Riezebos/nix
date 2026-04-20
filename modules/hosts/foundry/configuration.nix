@@ -104,19 +104,17 @@
     # is a one-shot `sudo netbird-foundry up` from the server after first
     # activation — prints an SSO URL to open on the laptop.
     #
-    # Package pinned to the rolling `nixpkgs-devenv` channel instead of the
-    # 25.11 stable's netbird 0.60.2. Rationale: netbird releases every few
-    # days and 25.11's pin sits ~7 minor versions behind upstream (DNS-in-
-    # userspace-WG fix, NAT-PMP/UPnP for better hole-punching, gRPC retry
-    # stability fixes, all landed post-0.60.2). For a networking/security
-    # tool where the upstream moves this fast, stale-by-half-a-year is the
-    # bigger risk than occasional rolling-channel surprises — and the server
-    # only picks up a new netbird when flake.lock is bumped and pushed, same
-    # cadence as everything else. Only this *package* is on rolling; the
-    # NixOS module (systemd hardening, polkit rules, preStart config merge)
-    # stays on 25.11. If you're tempted to do this override for nginx /
-    # postgresql / openssh too: don't — those want stable's long-tail.
-    services.netbird.package = inputs.nixpkgs-devenv.legacyPackages.${pkgs.stdenv.hostPlatform.system}.netbird;
+    # Pinned to `nixpkgs-unstable` (vanilla) rather than `nixpkgs-25.11`'s
+    # 0.60.2. Netbird releases every few days and 25.11 sits many minor
+    # versions behind — for a networking/security tool that moves this fast,
+    # stale is the bigger risk than rolling surprises. We also want upstream
+    # features that only land on newer releases (e.g. the reverse-proxy
+    # workflow) without waiting for the next NixOS stable. Only this *package*
+    # is on unstable; the NixOS module (systemd hardening, polkit, config
+    # merge) stays on 25.11. Do NOT pull this from `nixpkgs-devenv` — its
+    # patched nixpkgs triggers an x86_64-linux IFD during eval that breaks
+    # laptop-driven (aarch64-darwin) `nixos-rebuild`.
+    services.netbird.package = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.netbird;
 
     # Defaults we're deliberately accepting:
     #   interface = "nb-foundry"   (module default: "nb-${name}")
