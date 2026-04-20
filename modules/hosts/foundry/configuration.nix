@@ -84,68 +84,40 @@
     # if the detected driver differs.
     boot.initrd.availableKernelModules = ["e1000e"];
 
-    # Public SSH is closed by the explicit `networking.firewall` allow-list
-    # below; openFirewall = false stops the openssh module from adding port
-    # 22 to allowedTCPPorts (which would undo that). Port 22 is opened only
-    # on the netbird mesh interface further down.
+    # Phase 1c: public-but-hardened SSH. Key-only auth, root login off,
+    # small AllowUsers list, MaxAuthTries=3 for brute-force noise. We
+    # evaluated a Netbird mesh cutover (close public :22, SSH via mesh
+    # only) and chose against it for this box: the security gain over
+    # key-only SSH is marginal, while the mesh adds a third-party
+    # coordinator dependency and an interactive enrollment step to every
+    # fresh reinstall — both at odds with the "redeploy quickly if this
+    # box crashes" goal. Admin-only internal services (Phase 4+) will be
+    # protected at the HTTP layer via Caddy + Authentik ForwardAuth, not
+    # at the network layer.
     services.openssh = {
       enable = true;
-      openFirewall = false;
       settings = {
         PasswordAuthentication = false;
         PermitRootLogin = "no";
         KbdInteractiveAuthentication = false;
-        # Phase 1c: tighten brute-force surface. The firewall cutover in this
-        # commit closes public SSH entirely; these auth settings harden the
-        # brief window during earlier steps. AllowUsers matches the two real
-        # accounts on this box.
         MaxAuthTries = 3;
         AllowUsers = ["simon" "deploy"];
       };
     };
 
-    # Phase 1c: Netbird mesh client. The laptop is already on the mesh via
-    # the macOS GUI client; this brings foundry on too. Interactive enrollment
-    # is a one-shot `sudo netbird-foundry up` from the server after first
-    # activation — prints an SSO URL to open on the laptop.
-    #
-    # Pinned to `nixpkgs-unstable` (vanilla) rather than `nixpkgs-25.11`'s
-    # 0.60.2. Netbird releases every few days and 25.11 sits many minor
-    # versions behind — for a networking/security tool that moves this fast,
-    # stale is the bigger risk than rolling surprises. We also want upstream
-    # features that only land on newer releases (e.g. the reverse-proxy
-    # workflow) without waiting for the next NixOS stable. Only this *package*
-    # is on unstable; the NixOS module (systemd hardening, polkit, config
-    # merge) stays on 25.11. Do NOT pull this from `nixpkgs-devenv` — its
-    # patched nixpkgs triggers an x86_64-linux IFD during eval that breaks
-    # laptop-driven (aarch64-darwin) `nixos-rebuild`.
-    services.netbird.package = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.netbird;
-
-    # Defaults we're deliberately accepting:
-    #   interface = "nb-foundry"   (module default: "nb-${name}")
-    #   hardened = true            (dedicated system user, minimal caps)
-    #   openFirewall = true        (adds 51820/udp to public firewall
-    #                              for direct peer-to-peer hole-punching;
-    #                              WireGuard's crypto rejects anything
-    #                              without a valid key, so not a new
-    #                              attack surface)
-    services.netbird.clients.foundry.port = 51820;
-
-    # Phase 1c firewall cutover. Explicit allow-list, not "defaults plus
-    # openFirewall toggles". After activation:
-    #   - Public TCP: only port 2222 (initrd LUKS unlock — must stay public,
-    #     the netbird client can't run before root FS is decrypted).
-    #   - Public UDP: 51820 (added automatically by the netbird client module
-    #     for direct peer-to-peer). If you ever want to force all mesh
-    #     traffic through netbird's relays instead, set
-    #     services.netbird.clients.foundry.openFirewall = false.
-    #   - Mesh-only: real SSH (port 22) on the nb-foundry interface. The
-    #     netbird module also auto-adds 5353/udp and 22054/udp on nb-foundry
-    #     for its DNS forwarder; our entry merges with those.
+    # Explicit firewall allow-list so the public surface is visible in
+    # one place instead of implicit through `openFirewall` toggles on
+    # individual modules.
+    #   - 22   : SSH (added by `services.openssh` via its default
+    #            openFirewall = true — listed here for documentation).
+    #   - 2222 : initrd LUKS-unlock sshd. The main-system firewall is
+    #            inactive during initrd, so this rule is a defensive
+    #            no-op post-boot — but listing it makes the intent
+    #            explicit for anyone reading the config.
+    #   - Phase 4 will add 80/443 when Foundry/Caddy go up.
     networking.firewall = {
       enable = true;
-      allowedTCPPorts = [2222];
-      interfaces."nb-foundry".allowedTCPPorts = [22];
+      allowedTCPPorts = [22 2222];
     };
 
     # Phase 1c: unattended security updates. `operation = "boot"` stages
