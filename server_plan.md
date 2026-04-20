@@ -24,7 +24,8 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 1b** (Keychain-integrated `foundry-unlock`): done. Helper lives in `modules/home/shared.nix`.
 - **Phase 1c** (SSH hardening + firewall + unattended upgrades): deployed 2026-04-20 (commit `cbb089e`). Netbird mesh approach was evaluated and reverted — see the "Decision: no network mesh" note in Phase 1c.
 - **Phase 2** (sops-nix): done. Smoke-test secret is provisioned and decrypting at activation time.
-- **Phase 3 and beyond** (CI, Foundry migration, backups, monitoring, extras): pending.
+- **Phase 3** (GitHub Actions CI + deploy-rs + weekly flake-lock PR): workflows and `modules/deploy.nix` landed 2026-04-20. Goes live on push to main once the repo secrets/vars listed under "Phase 3 — required repo config" are set.
+- **Phase 4 and beyond** (Foundry migration, backups, monitoring, extras): pending.
 
 Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
 
@@ -510,6 +511,27 @@ Note: your repo is on GitHub, so you can use GitHub Actions instead of Forgejo A
 2. Use [`DeterminateSystems/update-flake-lock`](https://github.com/DeterminateSystems/update-flake-lock) action
 3. PR runs the build workflow automatically
 4. You review and merge, which triggers the deploy
+
+**Phase 3 — required repo config**
+
+Committed workflows: `.github/workflows/build.yml`, `deploy.yml`, `update-flake-lock.yml`. Deploy node config: `modules/deploy.nix`.
+
+GitHub **secrets** (Settings → Secrets and variables → Actions → Secrets):
+
+| Secret | Used by | What to put in it |
+|---|---|---|
+| `FOUNDRY_DEPLOY_KEY` | `deploy.yml` | Contents of `~/.config/foundry-bootstrap/deploy_ed25519` (the private half of the key baked into `configuration.nix` as `users.users.deploy.openssh.authorizedKeys.keys`). |
+| `FOUNDRY_HOST` | `deploy.yml` | The real hostname or IP of `foundry`. Passed via `deploy --hostname …` so the public flake never names it. |
+| `FOUNDRY_KNOWN_HOSTS` | `deploy.yml` | Output of `ssh-keyscan -t ed25519 <foundry-ip>`, run once from a trusted machine. Pins the host key so the CI runner can't TOFU an MITM. |
+| `CACHIX_AUTH_TOKEN` | `build.yml`, `deploy.yml` | *(optional)* Cachix push token. Only consulted when the matching variable below is set. |
+
+GitHub **variables** (same page, Variables tab):
+
+| Variable | Used by | What to put in it |
+|---|---|---|
+| `CACHIX_CACHE_NAME` | `build.yml`, `deploy.yml` | *(optional)* Name of a Cachix cache. If unset, both workflows skip the Cachix step entirely and still function — just without cross-run caching. |
+
+Enable branch protection on `main` once the workflows are green: require the `build` status, require PRs, and exempt the `update-flake-lock` bot if you want the weekly PR to land without a human approval (leave it gated if you'd rather eyeball each lock bump).
 
 **Decision point before Phase 4:** you now have a fully automated deploy pipeline. Push to main = safe deploy via CI. Test it with a harmless change (add a comment somewhere).
 

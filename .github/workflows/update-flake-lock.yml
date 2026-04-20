@@ -1,0 +1,41 @@
+name: update-flake-lock
+
+# Phase 3c of server_plan.md. Once a week the bot bumps flake.lock and
+# opens a PR; the build workflow then runs against the PR head so we
+# know before merging whether the new inputs actually build. Merging
+# the PR triggers the deploy workflow, which ships the bumped inputs
+# to the box — server autoUpgrade pulls from `github:Riezebos/nix`
+# nightly so the server converges shortly after.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 04:00 UTC Mondays. Lands before the server's 04:30 autoUpgrade,
+    # but autoUpgrade still reads from `main` so the bump only goes
+    # live once the PR is merged (by a human).
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+        with:
+          extra-conf: |
+            accept-flake-config = true
+
+      - name: Update flake.lock
+        uses: DeterminateSystems/update-flake-lock@main
+        with:
+          pr-title: "chore: weekly flake.lock update"
+          pr-labels: |
+            dependencies
+            automated
+          commit-msg: "chore: update flake.lock"
