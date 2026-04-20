@@ -44,6 +44,11 @@ in {
   # script and that derivation is x86_64-linux-only; other systems (our
   # aarch64-darwin laptop) simply skip them.
   perSystem = {system, ...}: {
+    # Same binary revision as `inputs.deploy-rs` / `flake.lock` — so CI can
+    # `nix run .#deploy-rs` instead of duplicating a `?rev=` URL.
+    apps = {
+      deploy-rs = inputs.deploy-rs.apps.${system}.deploy-rs;
+    };
     checks = lib.optionalAttrs (system == "x86_64-linux") (deployPkgs.deployChecks self.deploy);
   };
 }

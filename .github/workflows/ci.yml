@@ -20,31 +20,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # gitleaks-action posts SARIF / PR summaries.
-      pull-requests: write
-      security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
 
-      # Belt-and-braces over the local git-hooks.nix pre-commit gate:
-      # catches pushes with `--no-verify`. `pre-commit` check below
-      # re-runs the declarative hooks against the tree too.
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
           extra-conf: |
             accept-flake-config = true
 
       - name: Setup Cachix
         if: ${{ vars.CACHIX_CACHE_NAME != '' }}
-        uses: cachix/cachix-action@v15
+        uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: ${{ vars.CACHIX_CACHE_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -97,17 +86,17 @@ jobs:
       group: deploy-foundry
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
           extra-conf: |
             accept-flake-config = true
 
       - name: Setup Cachix
         if: ${{ vars.CACHIX_CACHE_NAME != '' }}
-        uses: cachix/cachix-action@v15
+        uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
         with:
           name: ${{ vars.CACHIX_CACHE_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -116,7 +105,7 @@ jobs:
       # pubkey lives in modules/hosts/foundry/configuration.nix under
       # `users.users.deploy.openssh.authorizedKeys.keys`.
       - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         with:
           ssh-private-key: ${{ secrets.FOUNDRY_DEPLOY_KEY }}
 
@@ -135,9 +124,10 @@ jobs:
       # the real IP never lands in this public repo. `--skip-checks`
       # because the build job above already built the deploy-rs
       # checks; re-running them here just doubles latency.
+      # Uses `apps.deploy-rs` from this flake (flake-locked input).
       - name: Deploy
         run: |
-          nix run github:serokell/deploy-rs -- \
+          nix run .#deploy-rs -- \
             --skip-checks \
             --hostname "${{ secrets.FOUNDRY_HOST }}" \
             .#foundry
