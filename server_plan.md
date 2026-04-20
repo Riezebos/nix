@@ -22,7 +22,7 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 0** (repo restructure + local tooling): done. Repo uses import-tree / flake-parts; gitleaks pre-commit active.
 - **Phase 1** (bare NixOS install + mdraid RAID1 + LUKS + SSH-initrd unlock): done. Box boots and reboots clean.
 - **Phase 1b** (Keychain-integrated `foundry-unlock`): done. Helper lives in `modules/home/shared.nix`.
-- **Phase 1c** (SSH hardening + firewall + unattended upgrades): **code on `main`, not yet deployed.** Netbird mesh approach was evaluated and reverted — see the "Decision: no network mesh" note in Phase 1c. Next deploy: `nixos-rebuild switch --flake .#foundry --target-host deploy@foundry --build-host deploy@foundry --sudo`.
+- **Phase 1c** (SSH hardening + firewall + unattended upgrades): deployed 2026-04-20 (commit `cbb089e`). Netbird mesh approach was evaluated and reverted — see the "Decision: no network mesh" note in Phase 1c.
 - **Phase 2** (sops-nix): done. Smoke-test secret is provisioned and decrypting at activation time.
 - **Phase 3 and beyond** (CI, Foundry migration, backups, monitoring, extras): pending.
 
