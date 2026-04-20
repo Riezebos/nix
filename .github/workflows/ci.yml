@@ -64,20 +64,25 @@ jobs:
             .#checks.x86_64-linux.deploy-schema
 
       # Full system closure. Catches most eval errors and any build-time
-      # failures in the foundry module graph.
+      # failures in the foundry module graph. This is what deploy-rs
+      # will activate; if it builds, activation is very likely to work.
+      #
+      # We intentionally do NOT also build `…system.build.vm` here, even
+      # though the plan suggests it as an optional extra gate. The VM
+      # variant evaluates `virtualisation.vmVariant` which assert-fails
+      # on our `boot.initrd.network.ssh.hostKeys` referencing a string
+      # path (`/etc/secrets/initrd/ssh_host_ed25519_key`) — VMs require
+      # literal Nix paths so the secret can be embedded at build time,
+      # but on the real box that file is provisioned at install via
+      # nixos-anywhere --extra-files and doesn't exist in the flake.
+      # Working around this would require a stack of vmVariant overrides
+      # (disable initrd-SSH, replace LUKS/mdraid with a plain disk…)
+      # that drift from the real config and stop catching useful bugs.
+      # `build.toplevel` + deploy-rs magic-rollback is the real gate.
       - name: Build foundry toplevel
         run: |
           nix build --print-build-logs \
             .#nixosConfigurations.foundry.config.system.build.toplevel
-
-      # Cheap extra sanity gate: the VM build exercises a stricter
-      # subset of module evaluation (some filesystem + bootloader
-      # assertions that `toplevel` skips) and catches a class of
-      # activation-time errors before they hit the real box.
-      - name: Build foundry VM
-        run: |
-          nix build --print-build-logs \
-            .#nixosConfigurations.foundry.config.system.build.vm
 
   deploy:
     needs: build
