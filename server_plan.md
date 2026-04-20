@@ -17,6 +17,17 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **TPM**: motherboard has a TPM header (SMBIOS port designator "TPM"), but no TPM device is present or active (`modprobe tpm_crb` / `tpm_tis` find nothing; `/dev/tpm*` does not exist). Intel PTT (firmware TPM, supported by the C246 chipset) is disabled in BIOS. Without BIOS access, no TPM.
 - **Conclusion**: this plan commits to **Legacy BIOS + GRUB + LUKS + SSH-in-initrd unlock** (no TPM auto-unlock). See Phase 1. A future BIOS-toggling session (UEFI + PTT + Secure Boot + TPM-bound unlock) is recorded as an optional upgrade path but not required.
 
+**Rollout progress (as of 2026-04-20)**
+
+- **Phase 0** (repo restructure + local tooling): done. Repo uses import-tree / flake-parts; gitleaks pre-commit active.
+- **Phase 1** (bare NixOS install + mdraid RAID1 + LUKS + SSH-initrd unlock): done. Box boots and reboots clean.
+- **Phase 1b** (Keychain-integrated `foundry-unlock`): done. Helper lives in `modules/home/shared.nix`.
+- **Phase 1c** (SSH hardening + firewall + unattended upgrades): **code on `main`, not yet deployed.** Netbird mesh approach was evaluated and reverted — see the "Decision: no network mesh" note in Phase 1c. Next deploy: `nixos-rebuild switch --flake .#foundry --target-host deploy@foundry --build-host deploy@foundry --sudo`.
+- **Phase 2** (sops-nix): done. Smoke-test secret is provisioned and decrypting at activation time.
+- **Phase 3 and beyond** (CI, Foundry migration, backups, monitoring, extras): pending.
+
+Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
+
 **Phase 0: Restructure existing repo + foundations**
 
 Goals: migrate your existing `nix` GitHub repo to the `import-tree` module pattern, add server tooling locally, generate keys.
@@ -286,6 +297,127 @@ Then reinstall (the whole flake is declarative — reinstall is cheap) with `sys
 
 **Decision point before Phase 2:** at this stage you have a bare NixOS box that unlocks via SSH on every boot. Do two full reboot cycles and confirm both times you get back in cleanly. If yes, proceed.
 
+**Phase 1c: Security hardening — SSH, firewall, unattended upgrades**
+
+Goal: shrink the public attack surface without adding network-layer dependencies that get in the way of recovery. Public SSH stays reachable but key-only and hardened; Phase 4 adds an HTTP-layer auth gate (Authentik ForwardAuth via Caddy) for admin-only services rather than gating at the network layer.
+
+**Decision: no network mesh (Netbird / Tailscale)**
+
+We evaluated closing public :22 and routing admin SSH through a Netbird mesh. Rejected:
+
+- For a single-admin homelab on ed25519-key-only SSH, the security delta over "public :22 + hardened config" is marginal. The realistic threats to this box are web-app RCE, kernel CVEs, and container escape — none of which a mesh prevents. SSH brute force is already defeated by key-only auth. An SSH 0-day is low-probability *and* a mesh daemon (Netbird/Tailscale) is itself a network-exposed daemon with its own potential 0-days.
+- A managed-coordinator mesh introduces a third-party dependency (Netbird.io or Tailscale control plane). An outage there wouldn't lock us out — the initrd-unlock and Hetzner rescue paths stay — but it adds a class of "why is nothing working" debugging we'd rather not have.
+- Mesh enrollment is interactive: `sudo netbird-foo up` → SSO in the browser → approve in the Netbird UI. That's a few seconds, but it is friction on every fresh reinstall, which is the exact scenario we're trying to keep fast.
+- Admin-only internal services (Grafana, Uptime Kuma, Authentik's own admin UI) will be gated at the HTTP layer in Phase 4 via Caddy `forward_auth` → Authentik. Same effective outcome (admins authenticate; public internet does not reach the app at all) with one fewer system to operate.
+
+The decision is reversible. A NixOS Netbird client is `services.netbird.clients.<name> = { ... };` plus a firewall swap — small to add later if a use case shows up (co-admin joining from an unstable IP, exposing a service to a phone that's not on a predictable IP). The repo briefly carried a working Netbird + firewall-cutover configuration on commits `3318c2c`, `488008d`, and `663ab97` before the revert; those remain in git history as a reference if we revisit.
+
+**1c-1: Hardened public SSH**
+
+In `modules/hosts/foundry/configuration.nix`:
+
+```nix
+services.openssh = {
+  enable = true;
+  settings = {
+    PasswordAuthentication = false;
+    PermitRootLogin = "no";
+    KbdInteractiveAuthentication = false;
+    MaxAuthTries = 3;
+    AllowUsers = [ "simon" "deploy" ];
+  };
+};
+```
+
+Key-only auth, `root` login off, tight `AllowUsers` — the bare-minimum settings that retire SSH brute force and account probing as meaningful threats.
+
+**1c-2: Explicit firewall allow-list**
+
+```nix
+networking.firewall = {
+  enable = true;
+  allowedTCPPorts = [ 22 2222 ];
+};
+```
+
+- `22`: SSH. The `services.openssh` module also adds this via `openFirewall = true` by default — listed here explicitly so the public surface is visible in one place.
+- `2222`: initrd LUKS-unlock sshd. The main-system firewall is inactive during initrd, so this rule is a defensive no-op post-boot — but listing it documents intent.
+- Phase 4 will add `80` and `443` when Caddy goes up.
+
+**1c-3: Unattended security updates**
+
+```nix
+system.autoUpgrade = {
+  enable = true;
+  flake = "github:Riezebos/nix";
+  flags = [ "-L" ];
+  dates = "04:30";
+  randomizedDelaySec = "45min";
+  operation = "boot";
+};
+```
+
+`operation = "boot"` stages the new generation into the bootloader without live-activating it, so autoUpgrade never restarts openssh / Foundry / Postgres mid-session. A manual (or scheduled) reboot window actually applies the update. CI (Phase 3c) is authoritative for bumping `flake.lock`; the server is purely a puller — do not run `--update-input` here.
+
+**Why no fail2ban (at this phase)**
+
+Key-only SSH has no brute-forceable surface. The real rate-limit targets will be Foundry's HTTP login and Authentik's in Phase 4, handled at the proxy layer (Caddy `rate_limit`) plus CrowdSec (below) rather than fail2ban log-parsing.
+
+**1c-4: Phase 4 security architecture (preview — implementation in Phase 4)**
+
+Committing these choices *here*, before any Phase 4 code gets written, so the shape of the system is decided:
+
+**Reverse proxy: Caddy.** Terminates TLS on 80/443, automatic ACME via Let's Encrypt. Reasons over nginx: automatic HTTPS with zero config, `forward_auth` directive for Authentik (one line per vhost), strong defaults (HSTS, HTTP/2, modern ciphers) out of the box, smaller config surface. Add HTTP security headers per vhost: `Strict-Transport-Security`, `Content-Security-Policy` (per app), `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`. Rate-limit login endpoints with `rate_limit` (5 req/min per IP is a reasonable start).
+
+**Auth: Authentik in front of admin UIs only.**
+
+- Foundry itself stays publicly accessible — players log in via Foundry's own auth.
+- Grafana, Uptime Kuma, any future admin UI: Caddy `forward_auth` → Authentik outpost. The login form is Authentik, not the app. Enable TOTP + WebAuthn on the admin flow.
+- Authentik runs in its own NixOS container (below), with its PostgreSQL + Redis bound to `127.0.0.1`.
+
+**Service isolation: NixOS containers + per-service systemd hardening.**
+
+Each public-facing service goes in a `containers.<name>` (systemd-nspawn-based): shared kernel with the host, but isolated filesystem, users, PID namespace, cgroups. Inside each container, the service runs under:
+
+```nix
+serviceConfig = {
+  DynamicUser = true;
+  ProtectSystem = "strict";
+  ProtectHome = true;
+  PrivateTmp = true;
+  NoNewPrivileges = true;
+  RestrictNamespaces = true;
+  SystemCallFilter = [ "@system-service" ];
+  CapabilityBoundingSet = "";   # tighten per service — empty if possible
+};
+```
+
+Defense in depth: nspawn handles coarse isolation (filesystem, PID, cgroup); systemd hardening handles fine-grained (syscalls, capabilities, namespaces). A handful of options are no-ops inside containers (`ProtectKernelModules`, `PrivateNetwork`) because nspawn already owns that boundary — the rest apply normally. Fully compatible.
+
+**Data: localhost-only + per-service sops scoping.**
+
+- PostgreSQL, Redis: bind to `127.0.0.1`. Never listen on the public interface.
+- Each service's systemd unit only gets the secrets it needs via sops-nix's per-secret `owner` / `group` / `mode`. A Foundry RCE must not be able to read Authentik's DB password — different files, different owners, different `LoadCredential` entries.
+
+**Reactive blocking: CrowdSec.**
+
+`services.crowdsec.enable = true;`. Parses auth / web-server logs, detects bad behavior (SSH brute-force, HTTP scan patterns, known-abusive user agents) and adds IP-level bans via nftables. Modern fail2ban replacement; community threat intel blocks known-bad IPs proactively. Runs on the host, not in a container, so it can see all service logs.
+
+**Recovery path (unchanged by Phase 1c)**
+
+1. Normal: `ssh foundry`.
+2. LUKS: `foundry-unlock` → `ssh -p 2222 root@<public IP>` (initrd).
+3. Break-glass: Hetzner Robot rescue → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix, *or* `nixos-anywhere --flake .#foundry` for a clean reinstall followed by a restic restore.
+
+End-to-end reinstall to a fresh box: ~1-2 hours. No mesh enrollment, no SSO dance. This is the trade we made by keeping SSH public — recovery stays scripted and dependency-free.
+
+**Explicitly deferred (not worth the maintenance tax for solo ops)**
+
+- **Egress filtering** (iptables OUTPUT per-service). Limits exfil blast radius if a service gets RCEd, but maintenance cost is high. Revisit only if an actual incident exposes a gap.
+- **Self-hosted WAF** (ModSecurity, Coraza). Massive ongoing tuning tax for marginal value on a small app set.
+- **Auditd / kernel lockdown / full syscall logging.** Low signal-to-noise for a homelab — the journal + Grafana Cloud logs (Phase 5) cover 95% of forensic need.
+- **Self-hosting an IdP instead of using Authentik's built-in.** Authentik is already an IdP; don't stack another.
+
 **Phase 2: sops-nix integration**
 
 Goal: your repo can hold encrypted secrets, the server can decrypt them at activation time.
@@ -400,7 +532,7 @@ Goal: v12 runs on the new server with your old data.
    - **Option A (simpler)**: put the zip on the server manually, reference it by absolute path in your Nix config. Quick but not reproducible.
    - **Option B (cleaner)**: store the zip on your Hetzner Storage Box or S3, use `pkgs.fetchurl` with a hash, add the access credentials via sops. Fully reproducible.
    - Start with A, migrate to B later.
-6. Add nginx with ACME for `foundry.simonito.com` — either as part of the foundry module or a separate `modules/features/nginx.nix`
+6. Add Caddy with automatic ACME for `foundry.simonito.com` — see the "Phase 4 security architecture" preview in Phase 1c-4 for the full reasoning (auto-HTTPS, `forward_auth` for Authentik on admin UIs, rate limiting, security headers). Either as part of the foundry module or a separate `modules/features/caddy.nix`.
 7. Restore the data on the server: `cd /var/lib/foundryvtt/v12/data && tar xzf /tmp/foundry-v12-data.tar.gz` (pre-create dir, set ownership)
 8. Review `options.json` in the restored data — might need to fix `dataPath` references
 9. Deploy via CI: commit, push, watch it build and activate
@@ -421,7 +553,13 @@ Goal: data is protected, you know when things break.
 8. Enable `services.prometheus.exporters.node` on the server and point a free Grafana Cloud tier (or a small self-hosted Grafana) at it. Disk/IO/memory trends catch slow-degrading problems before Uptime Kuma notices.
 9. Use `systemd` `OnFailure=` hooks on critical units (foundry, restic, nginx, postgresql) to ping a Healthchecks.io "failure" URL — journalctl alerts without self-hosting anything.
 10. **Test a restore to a temp directory** — don't skip this step. Do it once now, and schedule yourself a yearly reminder to do it again.
-11. Document the bootstrap procedure in a `BOOTSTRAP.md` in your repo — include the SSH-initrd unlock command (`ssh -p 2222 root@<server>`), where the LUKS passphrase lives, how to re-encrypt sops secrets if the host key rotates, the restore-from-restic command, and the "optional upgrade path" steps from Phase 1 in case you ever flip the box to UEFI + PTT.
+11. Document the bootstrap procedure in a `BOOTSTRAP.md` in your repo — include:
+    - the SSH-initrd unlock command (`ssh -p 2222 root@<public-ip>`, or invoke `foundry-unlock` from the laptop) and where the LUKS passphrase lives;
+    - how to re-encrypt sops secrets if the server's SSH host key rotates;
+    - the restore-from-restic command;
+    - the **free rescue-recovery runbook** — activate rescue in Robot → reset → SSH in with the Robot-registered key → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix. This is the break-glass path from "What to watch for" written out as actual commands so you don't have to think at 2am;
+    - a line reminding you to update the SSH key registered in Hetzner Robot whenever you rotate the laptop's key — rescue authorizes whatever is registered in Robot at activation time, not what's on the server;
+    - the "optional upgrade path" steps from Phase 1 in case you ever flip the box to UEFI + PTT (this is the only scenario where paid KVM enters the picture).
 
 **Phase 6: Database for the "more stuff"**
 
@@ -455,6 +593,8 @@ With CI/CD, sops secrets, backups, and monitoring in place, adding any new app i
 - **CI runner**: GitHub Actions works out of the box for your public repo. If you later want self-hosted CI on the server, that's a Phase 8 add-on.
 - **Secrets hygiene**: gitleaks runs as a pre-commit hook (Phase 0d, declarative via `git-hooks.nix`) and re-runs in CI via `nix flake check` (Phase 3a). After adding any secret also do a manual `git grep` for the value to be sure.
 - **Machine identity stays on the laptop, not in the repo**: server IPs, MAC addresses, private internal URLs live in `~/.ssh/config` (`Host foundry` from Phase 0a) and in sops — never in `modules/` or the `.md` files. The flake refers to the box as `foundry`; `foundry-unlock` resolves the real IP via `ssh -G foundry` at runtime. This repo is public; anyone who clones it should not learn which IP to start probing. Gitleaks **won't** catch IPs or hostnames — this is a discipline thing, not a tooling thing.
+- **Break-glass recovery**: the paths back into the box are (a) `ssh foundry` (public :22), (b) the initrd sshd on :2222 during a boot, (c) **Hetzner Robot's rescue system** if both of the above fail. Rescue is free and always available — PXE-booted over Hetzner's network, independent of anything on the disks or in the NixOS config. From rescue: `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` (passphrase from password manager) → `mdadm --assemble --scan` → mount → fix, or `nixos-anywhere --flake .#foundry` for a clean reinstall. Accept rescue as *the* fallback — don't try to engineer a "backup public SSH from my home IP" allow-rule, it'll rot. Make sure your Hetzner Robot login, its 2FA recovery codes, and the LUKS passphrase all live in a password manager you can reach from a phone. Paid KVM (~€25) is a different tool, needed only if the *BIOS itself* becomes unreachable — see Phase 1's "Future upgrade path".
+- **Things that would break the free rescue path** (short list, for paranoia): (1) messing with BIOS boot order so network boot / PXE is disabled — we have no BIOS access on this box, so we literally can't do this by accident; (2) letting the SSH public key registered in Hetzner Robot drift out of sync with what's on the laptop — rescue authorizes whichever key is in Robot at activation time, so when you rotate the laptop's key, update Robot's copy at the same time; (3) losing access to the Robot account (password + 2FA). None of these are normal-operations risks; all three are checklist items for `BOOTSTRAP.md` (Phase 5 step 11).
 - **Don't build Phase 3 before Phase 1 works end-to-end.** The temptation to "just set up CI first" is real, but you need a working server to deploy to.
 - **Step by step means step by step**: after each phase, commit, push, and *actually wait a day* using the system before moving on. You'll catch issues you'd miss in a marathon setup.
 
