@@ -28,6 +28,15 @@
 
     git-hooks.url = "github:cachix/git-hooks.nix";
     git-hooks.inputs.nixpkgs.follows = "nixpkgs";
+
+    # reckenrode/nix-foundryvtt packages FoundryVTT for NixOS. The zip itself
+    # is not redistributable (personal license) so the derivation uses
+    # `requireFile` + pinned hashes from its own versions.json; we seed the
+    # zip into the store once via `nix-store --add-fixed` on the build host.
+    # Following stable nixpkgs because this input is only consumed by the
+    # server build.
+    foundryvtt.url = "github:reckenrode/nix-foundryvtt";
+    foundryvtt.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs = inputs:

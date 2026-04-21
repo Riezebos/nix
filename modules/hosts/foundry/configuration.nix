@@ -12,6 +12,8 @@
     imports = [
       self.nixosModules.foundryHardware
       self.nixosModules.foundryDisko
+      self.nixosModules.foundry
+      self.nixosModules.caddy
       inputs.disko.nixosModules.disko
       inputs.sops-nix.nixosModules.sops
     ];
@@ -114,7 +116,8 @@
     #            inactive during initrd, so this rule is a defensive
     #            no-op post-boot — but listing it makes the intent
     #            explicit for anyone reading the config.
-    #   - Phase 4 will add 80/443 when Foundry/Caddy go up.
+    #   - 80/443 are added by self.nixosModules.caddy (Phase 4) so the
+    #            port list lives next to the service that needs it.
     networking.firewall = {
       enable = true;
       allowedTCPPorts = [22 2222];
