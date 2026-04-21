@@ -73,6 +73,7 @@
           ".DS_Store"
           "temp.ipynb"
           "my_local_files/"
+          ".claude/settings.local.json"
         ];
         includes = [
           {
