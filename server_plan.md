@@ -25,7 +25,9 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 1c** (SSH hardening + firewall + unattended upgrades): deployed 2026-04-20 (commit `cbb089e`). Netbird mesh approach was evaluated and reverted — see the "Decision: no network mesh" note in Phase 1c.
 - **Phase 2** (sops-nix): done. Smoke-test secret is provisioned and decrypting at activation time.
 - **Phase 3** (GitHub Actions CI + deploy-rs + weekly flake-lock PR): workflows and `modules/deploy.nix` landed 2026-04-20. Goes live on push to main once the repo secrets/vars listed under "Phase 3 — required repo config" are set.
-- **Phase 4 and beyond** (Foundry migration, backups, monitoring, extras): pending.
+- **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
+- **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
+- **Phase 5b and beyond** (monitoring, Healthchecks, restore drill, BOOTSTRAP.md): pending.
 
 Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
 
@@ -563,14 +565,99 @@ Goal: v12 runs on the new server with your old data.
 
 **Phase 5: Backups + monitoring**
 
-Goal: data is protected, you know when things break.
+Goal: data is protected, you know when things break. **Append-only is non-negotiable** — if foundry gets popped, the attacker must not be able to `forget --prune` the backups, ransomware-rewrite them, or quietly truncate history to outside the retention window.
 
-1. Order Hetzner Storage Box (~€4/month for 1TB)
-2. Add a restic feature module at `modules/features/restic.nix`, backing up `/var/lib/foundryvtt` to the Storage Box
-3. Store restic password and Storage Box credentials in sops
-4. Set retention via `pruneOpts` (`--keep-daily 7 --keep-weekly 4 --keep-monthly 6`) and make sure `forget` runs after each backup
-5. Add a **separate monthly `restic check --read-data-subset=5%`** job (catches silent bitrot — plain backups won't). Use a second `services.restic.backups.<name>` entry or a standalone `systemd.timer`.
-6. Add Healthchecks.io (free): one check for the backup job, **a second check for the `restic check` job**. A single check hides integrity failures.
+**Design (as landed in `modules/features/restic.nix`, 2026-04-21)**
+
+- **Transport**: restic with `rclone.program = ssh`. Foundry's SSH key is pinned in the Storage Box subaccount's `authorized_keys` with a forced command `rclone serve restic --stdio --append-only <repoName>`. Append-only is enforced by rclone on the Storage Box side — not by a flag on foundry, which could be flipped by an attacker.
+- **Two subaccounts on the Storage Box**:
+  - `foundry-ao` — append-only, used by foundry's daily backup + monthly check
+  - `foundry-admin` — full access, **only** used from the laptop for `forget --prune` and restores. Its SSH key never lives on foundry.
+- **Single restic repo** (encrypted with one password). Both subaccounts point at the same directory; the repo encryption password sits in sops and in 1Password.
+- **Storage Box settings**: **SSH Support on**, **External Reachability off**. Foundry is inside Hetzner's network so port 23 internal is sufficient. Toggle external reachability on temporarily when the laptop needs to prune, or route the laptop's prune through foundry with an SSH jump.
+- **Monthly integrity check** lives in its own `restic-check-foundry.service` / `.timer` (not `checkOpts`) so a bit-rot failure surfaces distinctly from backup failures, and heavy read-sampling doesn't bloat daily runtime.
+
+**Storage Box provisioning (landed 2026-04-21, recorded for replay on a new box)**
+
+The current Storage Box is `u580408.your-storagebox.de` (BX11). Both subaccounts share the `/foundry` home directory, which means they share the same `.ssh/authorized_keys` — so the single file has two lines, one per key, each with its own forced command. That turned out to be a feature: one repo, two credentials with different privileges.
+
+1. Order Storage Box (BX11, ~€4/month, 1 TB). Provisioning email gives the main username.
+2. In the Hetzner Console → Storage Box → Settings: enable **SSH Support** on the main account; leave **External Reachability on** for the duration of bootstrap (turn off after).
+3. Console → Storage Box → Sub-accounts → **Create sub-account** (×2):
+   - `foundry-ao`: home `/foundry`, SSH **on**, Samba/WebDAV/External **off**, read-write. Hetzner assigns `u580408-sub1`.
+   - `foundry-admin`: home `/foundry` (same), SSH **on**, read-write. Hetzner assigns `u580408-sub2`.
+   Both get a throwaway password (`openssl rand -base64 24`) — key auth will replace it in a moment.
+4. On the laptop, generate two ed25519 keypairs:
+   ```
+   ssh-keygen -t ed25519 -f ~/.config/foundry-bootstrap/storagebox_ao   -C foundry-ao   -N ""
+   ssh-keygen -t ed25519 -f ~/.config/foundry-bootstrap/storagebox_adm  -C foundry-admin -N ""
+   ```
+5. Build a single combined `authorized_keys` — both lines in one file because both subaccounts share `/foundry`:
+   ```
+   restrict,command="rclone serve restic --stdio --append-only ./" <foundry-ao pubkey>
+   restrict,command="rclone serve restic --stdio ./" <foundry-admin pubkey>
+   ```
+   `./` is the subaccount's chrooted root (their view of `/foundry`).
+6. Upload it via SFTP. Use **port 22** (plain SFTP, always available) — the extended port-23 channel can be finicky with fresh subaccount passwords:
+   ```
+   sftp -P 22 u580408-sub2@u580408-sub2.your-storagebox.de
+   sftp> mkdir .ssh
+   sftp> put combined-authorized_keys .ssh/authorized_keys
+   sftp> chmod 700 .ssh
+   sftp> chmod 600 .ssh/authorized_keys
+   ```
+7. Capture the Storage Box ed25519 host key for `programs.ssh.knownHosts` pinning:
+   ```
+   ssh-keyscan -t ed25519 -p 23 <subaccount>.your-storagebox.de
+   ssh-keyscan -t ed25519 -p 23 <subaccount>.your-storagebox.de | ssh-keygen -lf -   # sanity: match the Console's fingerprint
+   ```
+   Paste into `modules/features/restic.nix`.
+8. Fill in `storageboxHost` + `storageboxUser` at the top of `modules/features/restic.nix` (use the `foundry-ao` subaccount's values, i.e. `u580408-sub1`). Commit.
+9. Smoke-test the append-only guarantee from the laptop before deploying to foundry:
+   ```
+   # init the repo via the admin credential
+   nix run nixpkgs#restic -- \
+     -o rclone.program="ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm u580408-sub2@u580408-sub2.your-storagebox.de" \
+     -r rclone:x:x --password-file /tmp/pw init
+
+   # push a test snapshot via the append-only credential (should succeed)
+   nix run nixpkgs#restic -- -o rclone.program="...ao..." -r rclone:x:x backup /etc/hostname
+
+   # attempt to delete via the append-only credential (should 403)
+   nix run nixpkgs#restic -- -o rclone.program="...ao..." -r rclone:x:x forget --prune <id>
+
+   # clean up with the admin credential
+   nix run nixpkgs#restic -- -o rclone.program="...adm..." -r rclone:x:x forget --prune <id>
+   ```
+   Verified 2026-04-21: rclone returns `403 Forbidden` on every delete from the append-only channel, as designed.
+10. After foundry's first successful deploy + backup, turn **External Reachability off** in the Storage Box Settings. The laptop will then only reach the Storage Box when it's needed (flip temporarily for prunes, or bounce through foundry via `-J deploy@foundry`).
+
+**Secrets (sops)**
+
+Add these keys to `modules/hosts/foundry/secrets.yaml` via `sops modules/hosts/foundry/secrets.yaml`:
+
+- `restic/password` — a long random string (e.g. `openssl rand -base64 48`). Store the same string in 1Password under "foundry restic repo". **Losing this = losing the backups.**
+- `restic/ssh_key` — the private half of `storagebox_ao`. Paste the file contents verbatim (sops will encrypt it).
+
+After the first successful deploy, `nix flake check` and `restic snapshots` against the repo will both pass.
+
+**Pruning from the laptop (runs monthly, manual or scripted)**
+
+```
+# restic password lives in 1Password; copy to a temp file for the invocation
+op read "op://Personal/foundry restic repo password/password" > /tmp/pw && chmod 600 /tmp/pw
+trap "rm -f /tmp/pw" EXIT
+
+nix run nixpkgs#restic -- \
+  -o rclone.program="ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm u580408-sub2@u580408-sub2.your-storagebox.de" \
+  -r rclone:x:x \
+  --password-file /tmp/pw \
+  forget --keep-daily 7 --keep-weekly 4 --keep-monthly 6 --prune
+```
+
+The laptop credential is the only thing that can shrink the repo. Keep `storagebox_adm` off of foundry, off of CI, and out of sops.
+
+**Remaining Phase 5 items (monitoring)**
 7. Add Uptime Kuma — either as another service on the box or external free tier, for HTTP monitoring of `foundry.simonito.com`
 8. Enable `services.prometheus.exporters.node` on the server and point a free Grafana Cloud tier (or a small self-hosted Grafana) at it. Disk/IO/memory trends catch slow-degrading problems before Uptime Kuma notices.
 9. Use `systemd` `OnFailure=` hooks on critical units (foundry, restic, nginx, postgresql) to ping a Healthchecks.io "failure" URL — journalctl alerts without self-hosting anything.

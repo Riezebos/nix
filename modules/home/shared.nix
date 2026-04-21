@@ -473,6 +473,12 @@
       };
     };
 
+    # sops' default age key location differs per-OS (macOS: ~/Library/…,
+    # Linux: ~/.config/…). The `.sops.yaml` in this repo refers to the key
+    # at ~/.config/sops/age/keys.txt — point sops at it explicitly so the
+    # same path works on every machine.
+    home.sessionVariables.SOPS_AGE_KEY_FILE = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
+
     home.packages = with pkgs; [
       alejandra
       # No idea how to get the az ml extension to work
