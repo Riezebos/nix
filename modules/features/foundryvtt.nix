@@ -1,5 +1,5 @@
 {inputs, ...}: {
-  flake.nixosModules.foundry = {
+  flake.nixosModules.foundryvtt = {
     pkgs,
     lib,
     ...

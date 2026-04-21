@@ -12,7 +12,7 @@
     imports = [
       self.nixosModules.foundryHardware
       self.nixosModules.foundryDisko
-      self.nixosModules.foundry
+      self.nixosModules.foundryvtt
       self.nixosModules.caddy
       inputs.disko.nixosModules.disko
       inputs.sops-nix.nixosModules.sops

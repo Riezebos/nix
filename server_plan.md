@@ -544,12 +544,12 @@ Goal: v12 runs on the new server with your old data.
    tar czf foundry-v12-data.tar.gz -C /path/to/foundrydata .
    ```
 2. Copy to new server: `scp foundry-v12-data.tar.gz deploy@newserver:/tmp/`
-3. Add a Foundry feature module at `modules/features/foundry.nix`:
-   - Export `flake.nixosModules.foundry`
+3. Add a Foundry feature module at `modules/features/foundryvtt.nix`:
+   - Export `flake.nixosModules.foundryvtt`
    - System user `foundryvtt`
    - systemd service pointing at `/var/lib/foundryvtt/v12/data`
    - Listening on `127.0.0.1:30012`
-4. Import `self.nixosModules.foundry` in `modules/hosts/foundry/configuration.nix`
+4. Import `self.nixosModules.foundryvtt` in `modules/hosts/foundry/configuration.nix`
 5. Add the Foundry zip handling — two options:
    - **Option A (simpler)**: put the zip on the server manually, reference it by absolute path in your Nix config. Quick but not reproducible.
    - **Option B (cleaner)**: store the zip on your Hetzner Storage Box or S3, use `pkgs.fetchurl` with a hash, add the access credentials via sops. Fully reproducible.
