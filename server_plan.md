@@ -27,7 +27,10 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 3** (GitHub Actions CI + deploy-rs + weekly flake-lock PR): workflows and `modules/deploy.nix` landed 2026-04-20. Goes live on push to main once the repo secrets/vars listed under "Phase 3 — required repo config" are set.
 - **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
 - **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
-- **Phase 5b and beyond** (monitoring, Healthchecks, restore drill, BOOTSTRAP.md): pending.
+- **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): pending.
+- **Phase 5c** (monitoring backup + crash-analysis tooling): pending.
+- **Phase 5d** (alerting — Healthchecks.io + Alertmanager): pending.
+- **Phase 5e** (restore drill + BOOTSTRAP.md): pending.
 
 Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
 
@@ -657,18 +660,152 @@ nix run nixpkgs#restic -- \
 
 The laptop credential is the only thing that can shrink the repo. Keep `storagebox_adm` off of foundry, off of CI, and out of sops.
 
-**Remaining Phase 5 items (monitoring)**
-7. Add Uptime Kuma — either as another service on the box or external free tier, for HTTP monitoring of `foundry.simonito.com`
-8. Enable `services.prometheus.exporters.node` on the server and point a free Grafana Cloud tier (or a small self-hosted Grafana) at it. Disk/IO/memory trends catch slow-degrading problems before Uptime Kuma notices.
-9. Use `systemd` `OnFailure=` hooks on critical units (foundry, restic, nginx, postgresql) to ping a Healthchecks.io "failure" URL — journalctl alerts without self-hosting anything.
-10. **Test a restore to a temp directory** — don't skip this step. Do it once now, and schedule yourself a yearly reminder to do it again.
-11. Document the bootstrap procedure in a `BOOTSTRAP.md` in your repo — include:
-    - the SSH-initrd unlock command (`ssh -p 2222 root@<public-ip>`, or invoke `foundry-unlock` from the laptop) and where the LUKS passphrase lives;
-    - how to re-encrypt sops secrets if the server's SSH host key rotates;
-    - the restore-from-restic command;
-    - the **free rescue-recovery runbook** — activate rescue in Robot → reset → SSH in with the Robot-registered key → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix. This is the break-glass path from "What to watch for" written out as actual commands so you don't have to think at 2am;
-    - a line reminding you to update the SSH key registered in Hetzner Robot whenever you rotate the laptop's key — rescue authorizes whatever is registered in Robot at activation time, not what's on the server;
-    - the "optional upgrade path" steps from Phase 1 in case you ever flip the box to UEFI + PTT (this is the only scenario where paid KVM enters the picture).
+**Phase 5b: Monitoring stack**
+
+**Design rationale (researched 2026-04-22)**
+
+Community-consensus monitoring for a single NixOS server is **VictoriaMetrics + Loki + Grafana Alloy + Grafana**. All four have first-class NixOS modules in `nixos-25.11`. Total idle RAM: ~160–200 MB. SigNoz was evaluated and rejected — requires 4–8 GB RAM minimum for ClickHouse alone, no nixpkgs packaging, and would need fully custom NixOS modules from scratch. Grafana Alloy is Grafana's OTEL Collector distribution and replaces both Promtail (log shipping) and a standalone OTEL collector in a single process; application instrumentation can be added later without a new service. SQLite + Litestream as an OTEL backend was also evaluated; the only relevant project (`wperron/sqliteexporter`) is alpha, traces-only, has no visualization layer, and has no known production deployments — not viable.
+
+**Stack**
+
+| Service | NixOS option | Role |
+|---|---|---|
+| VictoriaMetrics | `services.victoriametrics` | Metrics store; scrapes node_exporter directly via `prometheusConfig` (no separate Prometheus process) |
+| node_exporter | `services.prometheus.exporters.node` | CPU, memory, disk, network, mdadm RAID stats |
+| Loki | `services.loki` | Log store; tsdb schema (not the deprecated boltdb-shipper) |
+| Grafana Alloy | `services.alloy` | Ships systemd journal → Loki via `loki.source.journal`; OTEL-ready for future app instrumentation |
+| Grafana | `services.grafana` | Dashboard; datasources provisioned declaratively |
+
+All services bind on localhost. Caddy reverse-proxies Grafana behind Authentik forward_auth (Phase 1c-4 security architecture) at e.g. `grafana.foundry.simonito.com`. Grafana and VictoriaMetrics both speak the Prometheus-compatible API, so standard community dashboards (e.g. Grafana dashboard ID 1860 for node metrics) work without changes.
+
+**Implementation steps**
+
+1. Create `modules/features/monitoring.nix` — exports `flake.nixosModules.monitoring`.
+2. Import it in `modules/hosts/foundry/configuration.nix`.
+3. Enable VictoriaMetrics with a `prometheusConfig` block that scrapes localhost node_exporter and any other future exporters.
+4. Enable Loki with tsdb storage at `/var/lib/loki`. Set retention (e.g. 30 days) via `compactor.retention_enabled = true` and `limits_config.retention_period = "30d"`.
+5. Enable Alloy with a River config that ships the systemd journal to Loki using `loki.source.journal`. Also wire up the VictoriaMetrics metrics endpoint (`prometheus.scrape` → `prometheus.remote_write`) so Alloy is the single scrape agent.
+6. Enable Grafana with provisioned datasources for VictoriaMetrics (`localhost:8428`, Prometheus-compatible) and Loki (`localhost:3100`). Pre-provision the node dashboard.
+7. Add Caddy vhost for Grafana behind Authentik forward_auth.
+
+**Phase 5c: Monitoring data backup + crash analysis**
+
+This builds entirely on the existing restic + Storage Box infrastructure from Phase 5a. No new credentials, no new Storage Box subaccounts.
+
+**Three tiers**
+
+*Tier 1 — Extend daily restic job to include monitoring data.*
+
+Add VictoriaMetrics and Loki data dirs to `services.restic.backups.foundry`. VictoriaMetrics requires a snapshot before backup to avoid a partially-written datastore. Loki's tsdb storage flushes completed chunk/index files atomically — backing it up live is safe (last few minutes of unflushed data may be absent, which Tier 2 below covers).
+
+```nix
+backupPrepareCommand = ''
+  snapshot=$(${pkgs.curl}/bin/curl -sf http://localhost:8428/snapshot/create \
+    | ${pkgs.jq}/bin/jq -r '.snapshot')
+  echo "$snapshot" > /run/vm-snapshot-name
+  systemctl stop foundryvtt.service
+'';
+
+backupCleanupCommand = ''
+  systemctl start foundryvtt.service
+  snapshot=$(cat /run/vm-snapshot-name 2>/dev/null || true)
+  [[ -n "$snapshot" ]] && \
+    ${pkgs.curl}/bin/curl -sf \
+      "http://localhost:8428/snapshot/delete?snapshot=$snapshot" || true
+'';
+
+paths = [
+  "/var/lib/foundryvtt"
+  "/var/lib/victoriametrics/snapshots"   # frozen snapshot only, not live data dir
+  "/var/lib/loki"
+];
+```
+
+*Tier 2 — Frequent journal backup for crash analysis (≤15 min gap).*
+
+A separate restic job runs every 15 minutes and backs up `/var/log/journal`. After any crash, the Storage Box holds journal data from at most 15 minutes before the event. Uses the same append-only credential — no new secrets. Restic's content-addressed deduplication keeps this cheap; journal files are append-only, so only new segments are uploaded each run.
+
+```nix
+services.restic.backups.foundry-journal = {
+  repository = "rclone:storagebox:foundry-journal";
+  passwordFile = config.sops.secrets."restic/password".path;
+  paths = [ "/var/log/journal" ];
+  initialize = true;
+  extraOptions = [ resticRcloneOption ];
+  timerConfig = {
+    OnCalendar = "*:00/15";
+    RandomizedDelaySec = "60";
+    Persistent = true;
+  };
+};
+```
+
+*Tier 3 — Laptop helper for crash analysis (no server required).*
+
+Add a `foundry-logs` zsh function to `modules/home/shared.nix`. After a crash, it reaches the Storage Box directly via the admin credential, restores the latest journal snapshot to a temp directory, and pipes it to `journalctl --file`. No server, no running services needed.
+
+```zsh
+foundry-logs () {
+  local tmpdir
+  tmpdir=$(mktemp -d /tmp/foundry-journal-XXXXX)
+  trap "rm -rf $tmpdir" EXIT
+  nix run nixpkgs#restic -- \
+    -o rclone.program="ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm \
+      u580408-sub2@u580408-sub2.your-storagebox.de" \
+    -r rclone:storagebox:foundry-journal \
+    --password-file <(op read "op://Personal/foundry restic repo password/password") \
+    restore latest --target "$tmpdir"
+  journalctl \
+    --file "$tmpdir/var/log/journal"/*/*.journal \
+    --no-pager --output short-precise \
+    "$@"
+}
+```
+
+Pass any `journalctl` flags through: `foundry-logs -u foundryvtt --since -1h` or `foundry-logs -p err -n 100`.
+
+For metrics after a crash (e.g. to see whether memory was spiking before an OOM), restore the daily VictoriaMetrics snapshot and run it locally:
+
+```bash
+# Restore latest daily snapshot
+nix run nixpkgs#restic -- \
+  -o rclone.program="ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm \
+    u580408-sub2@u580408-sub2.your-storagebox.de" \
+  -r rclone:storagebox:foundry \
+  --password-file /tmp/pw \
+  restore latest --path /var/lib/victoriametrics/snapshots --target /tmp/vm-restore
+
+# Spin up VictoriaMetrics against the snapshot (no install needed)
+nix run nixpkgs#victoriametrics -- \
+  -storageDataPath /tmp/vm-restore/var/lib/victoriametrics/snapshots/<snapshot-name>
+# Query at localhost:8428 or point a local Grafana at it
+```
+
+**Backup summary**
+
+| Tier | What's backed up | Frequency | Max data gap | Primary use |
+|---|---|---|---|---|
+| Daily (existing job, extended) | FoundryVTT + VictoriaMetrics snapshot + Loki | 04:00 daily | 24 h | Recovery, trend analysis |
+| Journal (new job) | `/var/log/journal` | Every 15 min | 15 min | Crash forensics |
+
+Both jobs use the same sops credentials and the same append-only Storage Box subaccount — no new secrets or subaccounts.
+
+**Phase 5d: Alerting**
+
+1. Add `systemd` `OnFailure=` hooks on critical units (`foundryvtt`, `restic-backups-foundry`, `restic-check-foundry`, monitoring services) to ping a Healthchecks.io "failure" URL — actionable alerts without self-hosting anything.
+2. Consider `services.alertmanager` with a Discord webhook once Grafana is up — VictoriaMetrics can push rule evaluations to Alertmanager for disk-full and service-down alerts.
+
+**Phase 5e: Operational hygiene**
+
+1. **Test a restore to a temp directory** — don't skip this step. Do it once now, and schedule yourself a yearly reminder. Verify: (a) `restic restore` from the daily job completes and FoundryVTT data is intact, (b) `foundry-logs` returns journal entries from before the test, (c) local VictoriaMetrics starts against the restored snapshot.
+2. Document the bootstrap procedure in `BOOTSTRAP.md`:
+   - the SSH-initrd unlock command (`ssh -p 2222 root@<public-ip>`, or invoke `foundry-unlock` from the laptop) and where the LUKS passphrase lives;
+   - how to re-encrypt sops secrets if the server's SSH host key rotates;
+   - the restore-from-restic command;
+   - the `foundry-logs` crash-analysis command and how to spin up VictoriaMetrics locally against a restored snapshot;
+   - the **free rescue-recovery runbook** — activate rescue in Robot → reset → SSH in with the Robot-registered key → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix. This is the break-glass path from "What to watch for" written out as actual commands so you don't have to think at 2am;
+   - a line reminding you to update the SSH key registered in Hetzner Robot whenever you rotate the laptop's key — rescue authorizes whatever is registered in Robot at activation time, not what's on the server;
+   - the "optional upgrade path" steps from Phase 1 in case you ever flip the box to UEFI + PTT (this is the only scenario where paid KVM enters the picture).
 
 **Phase 6: Database for the "more stuff"**
 
