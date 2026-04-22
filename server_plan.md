@@ -27,7 +27,7 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 3** (GitHub Actions CI + deploy-rs + weekly flake-lock PR): workflows and `modules/deploy.nix` landed 2026-04-20. Goes live on push to main once the repo secrets/vars listed under "Phase 3 — required repo config" are set.
 - **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
 - **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
-- **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): pending.
+- **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): module landed 2026-04-22 (`modules/features/monitoring.nix`). All services bound to 127.0.0.1 — access Grafana via `ssh -L 3000:127.0.0.1:3000 foundry` until the Authentik forward_auth story from Phase 4 lands and a `grafana.foundry.simonito.com` Caddy vhost can replace the tunnel.
 - **Phase 5c** (monitoring backup + crash-analysis tooling): pending.
 - **Phase 5d** (alerting — Healthchecks.io + Alertmanager): pending.
 - **Phase 5e** (restore drill + BOOTSTRAP.md): pending.

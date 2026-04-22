@@ -15,6 +15,7 @@
       self.nixosModules.foundryvtt
       self.nixosModules.caddy
       self.nixosModules.restic
+      self.nixosModules.monitoring
       inputs.disko.nixosModules.disko
       inputs.sops-nix.nixosModules.sops
     ];
