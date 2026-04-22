@@ -72,6 +72,15 @@
           };
         };
 
+        # Loki still initializes the memberlist-kv module even when every
+        # ring is configured as `inmemory`. Its default bind autodiscovery
+        # looks for `eth0`/`en0`/`lo` and hard-fails on foundry, which
+        # names its primary NIC `eno1` (predictable NIC names). Pin the
+        # bind address to localhost — single-node, nothing to gossip with.
+        memberlist = {
+          bind_addr = [bindHost];
+        };
+
         schema_config.configs = [
           {
             # Any date in the past — with a single schema entry this just
