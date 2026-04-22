@@ -60,7 +60,19 @@
       # stable so restic's metadata stays coherent across runs.
       repository = "rclone:storagebox:${repoName}";
       passwordFile = config.sops.secrets."restic/password".path;
-      paths = ["/var/lib/foundryvtt"];
+
+      # FoundryVTT world state + a point-in-time VictoriaMetrics snapshot +
+      # live Loki tsdb data. VM's snapshot endpoint hard-links pack files
+      # into /var/lib/victoriametrics/snapshots/<name>, so restic reads a
+      # frozen tree instead of the live /data dir. Loki's tsdb chunks and
+      # index files are flushed atomically on close — live-backing them up
+      # is safe; the last few minutes of unflushed log data are covered by
+      # the separate 15-minute journal job below.
+      paths = [
+        "/var/lib/foundryvtt"
+        "/var/lib/victoriametrics/snapshots"
+        "/var/lib/loki"
+      ];
 
       # Safe to leave on. Init writes a handful of new objects (`config`,
       # `keys/*`), all creates — append-only permits that. Subsequent runs
@@ -70,11 +82,28 @@
       # Foundry persists world state as live JSON/ndjson. Stopping the
       # service for the duration of the backup is the simplest way to get
       # a point-in-time snapshot; expect ~3–5s of daily downtime at 04:00.
+      # VictoriaMetrics stays up: its `/snapshot/create` endpoint hard-links
+      # the storage dir into a new subdirectory under snapshots/, which is
+      # what restic then reads. The snapshot name is recorded in /run so
+      # backupCleanupCommand can delete it after restic finishes, even if
+      # the main backup step fails.
       backupPrepareCommand = ''
+        set -euo pipefail
+        snapshot=$(${pkgs.curl}/bin/curl -sf \
+          http://127.0.0.1:8428/snapshot/create \
+          | ${pkgs.jq}/bin/jq -r '.snapshot')
+        printf '%s\n' "$snapshot" > /run/vm-snapshot-name
         ${pkgs.systemd}/bin/systemctl stop foundryvtt.service
       '';
       backupCleanupCommand = ''
         ${pkgs.systemd}/bin/systemctl start foundryvtt.service
+        snapshot=$(cat /run/vm-snapshot-name 2>/dev/null || true)
+        if [ -n "$snapshot" ]; then
+          ${pkgs.curl}/bin/curl -sf \
+            "http://127.0.0.1:8428/snapshot/delete?snapshot=$snapshot" \
+            >/dev/null || true
+          rm -f /run/vm-snapshot-name
+        fi
       '';
 
       extraOptions = [resticRcloneOption];
@@ -92,6 +121,27 @@
       timerConfig = {
         OnCalendar = "04:00";
         RandomizedDelaySec = "1h";
+        Persistent = true;
+      };
+    };
+
+    # Crash-forensics backup. `/var/log/journal` is append-only on disk, so
+    # restic's content-addressed dedup keeps each run cheap — only new
+    # journal segments get uploaded. Cadence is every 15 min, which caps
+    # the "what happened right before the crash?" gap at 15 minutes. Uses
+    # the same append-only credential + password as the main job. A
+    # separate repo (`foundry-journal`) keeps the restore path trivial
+    # (`restic restore latest` doesn't need a path filter) and isolates
+    # journal retention from the main repo's retention policy.
+    services.restic.backups.foundry-journal = {
+      repository = "rclone:storagebox:foundry-journal";
+      passwordFile = config.sops.secrets."restic/password".path;
+      paths = ["/var/log/journal"];
+      initialize = true;
+      extraOptions = [resticRcloneOption];
+      timerConfig = {
+        OnCalendar = "*:00/15";
+        RandomizedDelaySec = "60";
         Persistent = true;
       };
     };

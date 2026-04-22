@@ -421,6 +421,57 @@
               return 2
           }
 
+          # Crash forensics without touching the server. Pulls the latest
+          # snapshot of /var/log/journal from the Storage Box (via the
+          # admin credential — separate from the append-only key foundry
+          # holds) and opens journalctl --file against the restored
+          # directory. Any journalctl args passed through: e.g.
+          #     foundry-logs -u foundryvtt --since -1h
+          #     foundry-logs -p err -n 200
+          # Prompts once for the restic repo password (same string stored
+          # in sops on the server); the input is hidden and never touches
+          # disk outside a 0600 tmpfile that is wiped by the EXIT trap.
+          foundry-logs() {
+              emulate -L zsh
+              local tmpdir
+              tmpdir=$(mktemp -d /tmp/foundry-journal-XXXXXX) || return
+              trap "rm -rf '$tmpdir'" EXIT INT TERM
+              local ssh_cmd="ssh -p 23 -i $HOME/.config/foundry-bootstrap/storagebox_adm -o IdentitiesOnly=yes u580408-sub2@u580408-sub2.your-storagebox.de"
+              local pw_file="$tmpdir/pw"
+              local pw
+              print -n "foundry-logs: restic repo password: "
+              if ! IFS= read -rs pw; then
+                  print
+                  print -u2 "foundry-logs: could not read password."
+                  return 1
+              fi
+              print
+              if [[ -z "$pw" ]]; then
+                  print -u2 "foundry-logs: empty password, aborting."
+                  return 1
+              fi
+              umask 077
+              printf '%s' "$pw" > "$pw_file"
+              pw=""
+              if ! nix run nixpkgs#restic -- \
+                  -o "rclone.program=$ssh_cmd" \
+                  -r rclone:storagebox:foundry-journal \
+                  --password-file "$pw_file" \
+                  restore latest --target "$tmpdir" >/dev/null; then
+                  print -u2 "foundry-logs: restic restore failed."
+                  return 2
+              fi
+              local journals=("$tmpdir"/var/log/journal/*/*.journal(N))
+              if (( ! $#journals )); then
+                  print -u2 "foundry-logs: no .journal files found under the restored tree."
+                  return 3
+              fi
+              journalctl \
+                  --file "''${journals[@]}" \
+                  --no-pager --output short-precise \
+                  "$@"
+          }
+
           foundry-unlock-seed() {
               print "Storing LUKS passphrase for foundry in the login keychain."
               print "(Input is hidden; you will be prompted once.)"

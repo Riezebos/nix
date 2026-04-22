@@ -28,7 +28,7 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
 - **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
 - **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): module landed 2026-04-22 (`modules/features/monitoring.nix`). All services bound to 127.0.0.1 — access Grafana via `ssh -L 3000:127.0.0.1:3000 foundry` until the Authentik forward_auth story from Phase 4 lands and a `grafana.foundry.simonito.com` Caddy vhost can replace the tunnel.
-- **Phase 5c** (monitoring backup + crash-analysis tooling): pending.
+- **Phase 5c** (monitoring backup + crash-analysis tooling): module landed 2026-04-22. Daily restic now wraps a VictoriaMetrics `/snapshot/create` in `backupPrepareCommand` and includes `/var/lib/victoriametrics/snapshots` + `/var/lib/loki`; new `services.restic.backups.foundry-journal` pushes `/var/log/journal` to `rclone:storagebox:foundry-journal` every 15 min; `foundry-logs` zsh helper (in `modules/home/shared.nix`) restores the latest journal snapshot via the admin credential and pipes it to `journalctl --file`.
 - **Phase 5d** (alerting — Healthchecks.io + Alertmanager): pending.
 - **Phase 5e** (restore drill + BOOTSTRAP.md): pending.
 
