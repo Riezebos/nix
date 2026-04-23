@@ -6,25 +6,45 @@
     ...
   }: let
     # Healthchecks.io "ping by slug" URL form:
-    #   https://hc-ping.com/<project ping key>/<slug>[/start|/fail|/<exit>]
+    #   https://hc-ping.com/<project ping key>/<slug>[/start|/fail|/<exit>]?create=1
     # One project-wide ping key (sops) + per-check slugs in this file.
-    # Enable "Auto-provision checks from /ping/<key>/<slug> requests" under
-    # the Healthchecks.io project's settings so new units create their
-    # check on first ping — no Healthchecks.io-side fiddling when we add
-    # monitored services.
+    # `?create=1` asks Healthchecks.io to auto-create the check on the
+    # first ping (returning 201), or ping-and-return-200 if it already
+    # exists. This is a per-request flag — there is no project-level
+    # toggle for auto-provisioning — so every URL this helper emits
+    # carries it unconditionally.
+    # Docs: https://healthchecks.io/docs/auto_provisioning/
     #
     # The shared helper reads HEALTHCHECKS_PING_KEY from the unit's
     # environment (populated via EnvironmentFile from the sops template
-    # below). A failed ping is *never* allowed to fail the host unit — the
-    # `|| true` lives in each caller, not here, so the helper itself can
-    # use `set -eu` for argument sanity.
+    # below).
+    #
+    # This script **always exits 0**. A ping is a best-effort side
+    # channel: a missing env var, a network blip, or a 404 from
+    # Healthchecks.io (e.g. auto-provision off) must never propagate into
+    # the caller. If the helper here failed, an `ExecStartPost=` would
+    # flip its parent restic unit to "failed", and — worse — the
+    # `healthchecks-fail@` template unit itself would end up "failed"
+    # and cause deploy-rs to abort the whole activation and roll back
+    # (seen in CI run 24833575949 against `loki` already being down).
+    # The curl output still lands in the journal, so a broken ping is
+    # visible without taking services or deploys down with it.
     healthchecksPing = pkgs.writeShellScript "healthchecks-ping" ''
-      set -eu
-      : "''${HEALTHCHECKS_PING_KEY:?HEALTHCHECKS_PING_KEY not set in environment}"
-      slug="$1"
+      slug="''${1:-}"
       suffix="''${2:-}"
-      exec ${pkgs.curl}/bin/curl -fsS -m 10 --retry 3 --retry-delay 2 \
-        "https://hc-ping.com/$HEALTHCHECKS_PING_KEY/$slug$suffix" >/dev/null
+      if [ -z "$slug" ]; then
+        echo "healthchecks-ping: slug argument missing; skipping" >&2
+        exit 0
+      fi
+      if [ -z "''${HEALTHCHECKS_PING_KEY:-}" ]; then
+        echo "healthchecks-ping: HEALTHCHECKS_PING_KEY not set; skipping ping for $slug$suffix" >&2
+        exit 0
+      fi
+      if ! ${pkgs.curl}/bin/curl -fsS -m 10 --retry 3 --retry-delay 2 \
+         "https://hc-ping.com/$HEALTHCHECKS_PING_KEY/$slug$suffix?create=1" >/dev/null; then
+        echo "healthchecks-ping: ping for $slug$suffix failed (see curl output above); continuing" >&2
+      fi
+      exit 0
     '';
 
     healthchecksEnvFile = config.sops.templates."healthchecks-ping.env".path;
