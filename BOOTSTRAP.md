@@ -10,16 +10,15 @@ Everything here runs from the laptop unless a step says otherwise.
 
 | Thing | Location |
 |---|---|
-| LUKS passphrase (authoritative) | 1Password, item "foundry LUKS" |
+| LUKS passphrase (authoritative) | Bitwarden |
 | LUKS passphrase (daily cache) | macOS Keychain — `security=foundry-luks`, `account=foundry`; seeded via `foundry-unlock-seed` |
-| Restic repo password (authoritative) | 1Password, item "foundry restic repo password" |
+| Restic repo password (authoritative) | Bitwarden |
 | Restic repo password (server-side copy) | sops → `restic/password` (encrypted in `modules/hosts/foundry/secrets.yaml`) |
 | Append-only Storage Box SSH key | sops → `restic/ssh_key`; decrypted on the server only |
 | Full-access (admin) Storage Box SSH key | `~/.config/foundry-bootstrap/storagebox_adm` on the laptop. **Never** on foundry, in sops, or in CI |
 | Deploy SSH key (CI → foundry) | `~/.config/foundry-bootstrap/deploy_ed25519` on the laptop; mirrored as a GitHub Actions secret |
 | Initrd SSH host key | `/etc/secrets/initrd/ssh_host_ed25519_key` on foundry, shipped via `nixos-anywhere --extra-files` during install |
 | Hetzner Robot account SSH key | Uploaded separately in Robot's "key management" — controls rescue-system access only |
-| Hetzner Robot 2FA recovery codes | 1Password |
 | Age recipient for sops | `.sops.yaml` — `&simon` (laptop) + `&foundry` (server's host key → age) |
 
 ## Routine: unlock after a reboot
@@ -36,7 +35,7 @@ Manual fallback if the Keychain item is missing or the helper breaks:
 
 ```
 ssh -p 2222 -o StrictHostKeyChecking=accept-new root@foundry
-# paste the LUKS passphrase from 1Password; session closes itself once the
+# paste the LUKS passphrase from Bitwarden; session closes itself once the
 # real system takes over
 ```
 
@@ -85,47 +84,74 @@ temporarily in the Storage Box console, or bounce through foundry:
 ```
 # Option A — temporary direct access: toggle External Reachability ON, then OFF after.
 # Option B — ProxyJump via foundry (leave External Reachability off):
-SB_SSH='ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm \
-        -o ProxyJump=deploy@foundry \
-        u580408-sub2@u580408-sub2.your-storagebox.de'
+#
+# Keep this on ONE LINE. restic word-splits `rclone.program` on whitespace
+# and does not run it through a shell — backslash-newlines stay literal and
+# ssh then reads the split tokens as positional args, landing on e.g.
+# "Could not resolve hostname serve".
+SB_SSH='ssh -p 23 -i ~/.config/foundry-bootstrap/storagebox_adm -o ProxyJump=foundry u580408-sub2@u580408-sub2.your-storagebox.de'
 ```
 
 Fetch the repo password and restore:
 
 ```
-op read "op://Personal/foundry restic repo password/password" > /tmp/pw
-chmod 600 /tmp/pw
-trap 'shred -u /tmp/pw 2>/dev/null || rm -f /tmp/pw' EXIT
+# zsh and bash disagree on `read`'s prompt flag — zsh uses `?prompt` in the
+# variable argument, bash uses `-p prompt`. This form works in both.
+printf 'Enter restic repo password: ' >&2
+IFS= read -rs RESTIC_PASSWORD
+echo
+export RESTIC_PASSWORD
 
 # List snapshots — pick one or use `latest`
 nix run nixpkgs#restic -- \
   -o rclone.program="$SB_SSH" \
   -r rclone:storagebox:foundry \
-  --password-file /tmp/pw \
   snapshots
 
-# Full restore to a scratch tree
+# `--path` and `--include` do DIFFERENT jobs and you need both:
+#   --path <p>    = snapshot SELECTOR. `latest` picks the newest
+#                   snapshot whose `paths` field contains <p>. Nothing
+#                   about which files are restored.
+#   --include <p> = file-tree FILTER. After a snapshot is chosen,
+#                   extract only paths under <p>.
+# The daily snapshot carries paths = [/var/lib/foundryvtt,
+# /var/lib/victoriametrics/snapshots, /var/lib/loki] — so `--path` alone
+# restores all 8 GB of it. Add `--include` to pick one subtree.
+# Separately, the rclone URL's `<path>` segment is cosmetic: the Storage
+# Box's forced command chroots every call to the same directory, so
+# `foundry` and `foundry-journal` resolve to the same restic repo. The
+# `--path` filter is what distinguishes daily from journal snapshots.
 nix run nixpkgs#restic -- \
   -o rclone.program="$SB_SSH" \
   -r rclone:storagebox:foundry \
-  --password-file /tmp/pw \
-  restore latest --target /tmp/foundry-restore
+  restore latest \
+    --path /var/lib/foundryvtt \
+    --include /var/lib/foundryvtt \
+    --target /tmp/foundry-restore
+
+unset RESTIC_PASSWORD
 ```
 
 Restored paths:
 
 - `/tmp/foundry-restore/var/lib/foundryvtt`  — worlds + modules + systems
-- `/tmp/foundry-restore/var/lib/victoriametrics/snapshots/<name>`  — frozen VM tree
-- `/tmp/foundry-restore/var/lib/loki`  — tsdb chunks + index
 
-The 15-min journal repo is a separate repository:
+Repeat with matching `--path` + `--include` pairs for the other subtrees (VM snapshots, Loki). Drop `--target` and run `snapshots` to see what's available first:
+```
+nix run nixpkgs#restic -- -o rclone.program="$SB_SSH" \
+  -r rclone:storagebox:foundry snapshots
+```
+
+The 15-min journal snapshots live in the same repo, filtered by path:
 
 ```
+# Re-use the RESTIC_PASSWORD export from the previous block (or re-prompt).
 nix run nixpkgs#restic -- \
   -o rclone.program="$SB_SSH" \
   -r rclone:storagebox:foundry-journal \
-  --password-file /tmp/pw \
-  restore latest --target /tmp/foundry-journal-restore
+  restore latest \
+    --path /var/log/journal \
+    --target /tmp/foundry-journal-restore
 ```
 
 ## Crash analysis (no server required)
@@ -141,23 +167,32 @@ Metrics from the same window — restore the daily snapshot's VM tree and run
 VictoriaMetrics locally against it (no install needed):
 
 ```
-# Restore just the VM snapshot path
+# Restore the entire VM data tree (RESTIC_PASSWORD must be exported).
+# We back up all of /var/lib/victoriametrics because `snapshots/<name>/`
+# is a structure of relative symlinks back into /var/lib/victoriametrics/
+# data/<table>/snapshots/<name>/ — grabbing only `snapshots/` would
+# restore dangling pointers.
 nix run nixpkgs#restic -- \
   -o rclone.program="$SB_SSH" \
   -r rclone:storagebox:foundry \
-  --password-file /tmp/pw \
   restore latest \
-    --path /var/lib/victoriametrics/snapshots \
+    --path /var/lib/victoriametrics \
+    --include /var/lib/victoriametrics \
     --target /tmp/vm-restore
 
-# Find the snapshot name and start VM against it
-snap=$(ls /tmp/vm-restore/var/lib/victoriametrics/snapshots | head -1)
+# Point VM at the restored data dir directly. The live data + the
+# snapshot-hardlink tree are both there; VM opens it like its own
+# working dir.
 nix run nixpkgs#victoriametrics -- \
-  -storageDataPath="/tmp/vm-restore/var/lib/victoriametrics/snapshots/$snap" \
+  -storageDataPath=/tmp/vm-restore/var/lib/victoriametrics \
+  -httpListenAddr=127.0.0.1:8428 \
   -retentionPeriod=12
 
-# In another shell, query it
-curl -s 'http://127.0.0.1:8428/api/v1/query?query=up' | jq .
+# In another shell, query it. Use a `time=` inside the restored window
+# (snapshot dir name = YYYYMMDDhhmmss-<hex>), since /query defaults to now.
+curl -sG 'http://127.0.0.1:8428/api/v1/query' \
+  --data-urlencode 'query=up' \
+  --data-urlencode 'time=2026-04-23T02:00:00Z' | jq .
 ```
 
 Point a local Grafana at `http://127.0.0.1:8428` as a Prometheus datasource if you
@@ -168,7 +203,7 @@ want graphs; the stock node-exporter dashboard (Grafana.com ID 1860) works uncha
 Run this once after landing Phase 5e, then every 12 months. Put the next date in
 your calendar — don't rely on memory.
 
-1. **Restore the daily repo** to `/tmp/foundry-restore` per "Restore from restic" above.
+1. **Restore the FoundryVTT path** to `/tmp/foundry-restore` per "Restore from restic" above — always pass `--path /var/lib/foundryvtt`, otherwise `latest` returns a journal snapshot (all paths share one repo on the Storage Box).
 2. **Confirm FoundryVTT data is intact:**
    ```
    ls /tmp/foundry-restore/var/lib/foundryvtt/Data/worlds
@@ -183,19 +218,34 @@ your calendar — don't rely on memory.
    Expect entries dated within the last six hours. If it returns nothing, the
    15-min journal job is broken and you won't have crash forensics when you need
    them — fix before moving on.
-4. **Confirm local VictoriaMetrics starts against the restored snapshot:**
+4. **Confirm local VictoriaMetrics starts against the restored snapshot.**
+   Two checks — "VM opened the data" and "there's real content in it":
    ```
    # (run the VM restore + spin-up from the previous section)
-   curl -s 'http://127.0.0.1:8428/api/v1/query?query=up{job="node"}' | jq .
+
+   # (a) Is the snapshot non-empty? This is time-independent.
+   curl -s 'http://127.0.0.1:8428/api/v1/label/__name__/values' \
+     | jq '.data | length'
+   # expect a few hundred metric names
+
+   # (b) Was scraping actually working at snapshot time? /api/v1/query
+   # evaluates at `time=now` by default, and the snapshot's data ends at
+   # the moment the snapshot was taken — so use a time INSIDE the window.
+   # The snapshot dir name encodes the time: `YYYYMMDDhhmmss-<hex>`.
+   # Pick something a few minutes before that.
+   curl -sG 'http://127.0.0.1:8428/api/v1/query' \
+     --data-urlencode 'query=up{job="node"}' \
+     --data-urlencode 'time=2026-04-23T02:00:00Z' | jq .
    ```
-   Expect a non-empty `result` array with at least one `value`. A 200 with
-   `"result": []` means the snapshot restored but the scrape labels don't match
-   — still a red flag; VM started but the data path is wrong.
+   Expect (a) non-zero and (b) `data.result` non-empty with one entry per
+   scrape target. Both empty = snapshot restored but VM isn't seeing the
+   data — drill failed, investigate. Only (b) empty = scrape wasn't running
+   at that time, pick a different `time=` value.
 5. **Tear down:**
    ```
    pkill -f 'storageDataPath=.*vm-restore'    # kill local VM
    rm -rf /tmp/foundry-restore /tmp/vm-restore /tmp/foundry-journal-restore
-   shred -u /tmp/pw 2>/dev/null || rm -f /tmp/pw
+   unset RESTIC_PASSWORD
    ```
    If you toggled External Reachability on, toggle it off in the Storage Box
    console.
@@ -238,7 +288,7 @@ path" below).
    mdadm --assemble --scan
    cat /proc/mdstat                       # expect md/root, State: clean
    cryptsetup open /dev/md/root cryptroot
-   # paste the LUKS passphrase from 1Password
+   # paste the LUKS passphrase from Bitwarden
    mkdir -p /mnt
    mount /dev/mapper/cryptroot /mnt
    mount /dev/nvme0n1p2 /mnt/boot-1       # only needed if touching GRUB
@@ -278,7 +328,7 @@ Every time you rotate the laptop's SSH key, do these in the same session:
 Paranoia list (things that would break the free rescue path):
 
 - Removing the Robot key without adding a replacement first.
-- Losing the Robot account (password + 2FA recovery codes). Keep those in 1Password
+- Losing the Robot account (password + 2FA recovery codes). Keep those in Bitwarden
   alongside the LUKS passphrase. Test a login from your phone at least once.
 - BIOS boot order breaking PXE — can't happen by accident on this box, we have
   no BIOS access.
@@ -315,6 +365,6 @@ unreachable".
    systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 /dev/md/root
    ```
 6. **Reboot** and confirm the box comes up without touching port 2222. Keep a
-   recovery passphrase in 1Password — if PCR 7 changes (firmware update, Secure
+   recovery passphrase in Bitwarden — if PCR 7 changes (firmware update, Secure
    Boot signature change), TPM unsealing fails and you're back to typing the
    passphrase manually.

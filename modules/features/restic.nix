@@ -61,16 +61,28 @@
       repository = "rclone:storagebox:${repoName}";
       passwordFile = config.sops.secrets."restic/password".path;
 
-      # FoundryVTT world state + a point-in-time VictoriaMetrics snapshot +
-      # live Loki tsdb data. VM's snapshot endpoint hard-links pack files
-      # into /var/lib/victoriametrics/snapshots/<name>, so restic reads a
-      # frozen tree instead of the live /data dir. Loki's tsdb chunks and
-      # index files are flushed atomically on close — live-backing them up
-      # is safe; the last few minutes of unflushed log data are covered by
-      # the separate 15-minute journal job below.
+      # FoundryVTT world state + the entire VictoriaMetrics data tree +
+      # live Loki tsdb data.
+      #
+      # VictoriaMetrics note (corrected 2026-04-23 after a restore drill):
+      # VM's `/snapshot/create` does NOT build a self-contained hardlinked
+      # tree under `snapshots/<name>/`. It builds a structure of RELATIVE
+      # SYMLINKS: `snapshots/<name>/data/{small,big,indexdb}` each point
+      # at `../../../data/<table>/snapshots/<name>/`, where the hardlinked
+      # partition files actually live. Backing up only `snapshots/` means
+      # capturing dangling symlinks. So back up the whole
+      # `/var/lib/victoriametrics` dir; restic dedup + the fact that VM
+      # parts are immutable once written keep run-over-run cost near zero
+      # on the bytes, and the backupPrepareCommand's snapshot still acts
+      # as the point-in-time anchor for a clean restore.
+      #
+      # Loki's tsdb chunks and index files are flushed atomically on
+      # close — live-backing them up is safe; the last few minutes of
+      # unflushed log data are covered by the separate 15-minute journal
+      # job below.
       paths = [
         "/var/lib/foundryvtt"
-        "/var/lib/victoriametrics/snapshots"
+        "/var/lib/victoriametrics"
         "/var/lib/loki"
       ];
 

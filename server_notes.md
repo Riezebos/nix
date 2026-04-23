@@ -167,7 +167,7 @@ Any machine with `~/.ssh/id_ed25519` (the `info@datagiant.org` key)
 can do this — the initrd authorized_keys is populated from
 `users.users.simon.openssh.authorizedKeys.keys`.
 
-**The authoritative copy of the LUKS passphrase lives in 1Password**
+**The authoritative copy of the LUKS passphrase lives in Bitwarden**
 (or whatever password manager — update this line once confirmed). The
 keychain copy is a convenience cache, not a backup. If both go away,
 the disks are a brick — no hardware-assisted recovery path on this

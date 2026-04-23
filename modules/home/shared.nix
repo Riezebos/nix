@@ -459,11 +459,23 @@
               umask 077
               printf '%s' "$pw" > "$pw_file"
               pw=""
+              # Explicit --path filter. The Storage Box's forced command
+              # chroots both subaccount URLs to the same `/foundry` dir, so
+              # `rclone:storagebox:foundry` and `rclone:storagebox:foundry-journal`
+              # resolve to a single underlying restic repo. `--path` on
+              # restore is a snapshot selector (pick the newest snapshot
+              # whose `paths` field contains the given path) — here it
+              # picks the latest journal snapshot rather than the daily
+              # 8 GB one. No --include needed: journal snapshots carry
+              # exactly one path, so the selector and the extracted tree
+              # are already the same.
               if ! nix run nixpkgs#restic -- \
                   -o "rclone.program=$ssh_cmd" \
                   -r rclone:storagebox:foundry-journal \
                   --password-file "$pw_file" \
-                  restore latest --target "$tmpdir" >/dev/null; then
+                  restore latest \
+                    --path /var/log/journal \
+                    --target "$tmpdir" >/dev/null; then
                   print -u2 "foundry-logs: restic restore failed."
                   return 2
               fi

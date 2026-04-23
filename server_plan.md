@@ -28,7 +28,9 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
 - **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
 - **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): module landed 2026-04-22 (`modules/features/monitoring.nix`). All services bound to 127.0.0.1 — access Grafana via `ssh -L 3000:127.0.0.1:3000 foundry` until the Authentik forward_auth story from Phase 4 lands and a `grafana.foundry.simonito.com` Caddy vhost can replace the tunnel.
-- **Phase 5c** (monitoring backup + crash-analysis tooling): module landed 2026-04-22. Daily restic now wraps a VictoriaMetrics `/snapshot/create` in `backupPrepareCommand` and includes `/var/lib/victoriametrics/snapshots` + `/var/lib/loki`; new `services.restic.backups.foundry-journal` pushes `/var/log/journal` to `rclone:storagebox:foundry-journal` every 15 min; `foundry-logs` zsh helper (in `modules/home/shared.nix`) restores the latest journal snapshot via the admin credential and pipes it to `journalctl --file`.
+- **Phase 5c** (monitoring backup + crash-analysis tooling): module landed 2026-04-22. Daily restic now wraps a VictoriaMetrics `/snapshot/create` in `backupPrepareCommand` and includes `/var/lib/victoriametrics/snapshots` + `/var/lib/loki`; new `services.restic.backups.foundry-journal` pushes `/var/log/journal` every 15 min; `foundry-logs` zsh helper (in `modules/home/shared.nix`) restores the latest journal snapshot via the admin credential and pipes it to `journalctl --file`. **Corrections (surfaced 2026-04-23 during Phase 5e's drill):**
+1. The plan called for two distinct repos (`foundry` and `foundry-journal`), but the Storage Box's forced command hard-codes `./` so both rclone URLs resolve to the same underlying restic repo. Functionality is unchanged — snapshots carry their source path as metadata, so `restore --path <p>` disambiguates — but "two repos" is a naming fiction. `foundry-logs` and BOOTSTRAP.md now pass `--path /var/log/journal` / `--path /var/lib/foundryvtt` explicitly. True isolation would require separate Storage Box subaccounts with forced commands pinning different paths; deferred as not worth it for single-admin ops.
+2. Backing up only `/var/lib/victoriametrics/snapshots/` captured dangling pointers. VM's `/snapshot/create` builds `snapshots/<name>/data/{small,big,indexdb}` as RELATIVE SYMLINKS back into `/var/lib/victoriametrics/data/<table>/snapshots/<name>/`, which wasn't in the restic path list. Fix (restic.nix): back up the whole `/var/lib/victoriametrics` tree. The `backupPrepareCommand` snapshot is still useful as a point-in-time anchor inside the captured tree; the live `data/` dir comes along for free and VM's part files are immutable once written, so the backup is effectively consistent even against concurrent scrapes. Cost is small (VM data is tens of MB/year on this box) and restic dedup keeps run-over-run delta near zero.
 - **Phase 5d** (alerting — Healthchecks.io + Alertmanager): module landed 2026-04-23 (`modules/features/alerting.nix`). `healthchecks-fail@<slug>.service` template wired into foundryvtt, caddy, loki, grafana, victoriametrics, alloy (fail-only) and the three restic units (fail + success ping for dead-man-switch). **Goes live after**: (1) sign up at healthchecks.io (free tier), (2) in the default Project → Project Settings → click Create Ping Key and copy it, (3) `sops modules/hosts/foundry/secrets.yaml` → add `healthchecks.pingkey: <key>`. Auto-provisioning is a per-request flag (`?create=1`) not a project setting — the `healthchecks-ping` helper appends it unconditionally. First run of each unit will auto-provision its Healthchecks.io check; tune cadence/grace per check in the Healthchecks.io UI afterwards (suggested: `daily-backup` 1d/6h, `journal-backup` 1h/30m, `restic-check` 31d/1d, long-running services "simple" mode without heartbeat). Alertmanager for VictoriaMetrics rule evaluations is deferred to a later pass.
 - **Phase 5e** (restore drill + BOOTSTRAP.md): `BOOTSTRAP.md` landed 2026-04-23. Restore drill is a **manual** step — run the "Yearly restore drill" section of BOOTSTRAP.md once now (FoundryVTT data intact + `foundry-logs` + local VictoriaMetrics against the restored snapshot) and schedule a yearly calendar reminder.
 
@@ -578,7 +580,7 @@ Goal: data is protected, you know when things break. **Append-only is non-negoti
 - **Two subaccounts on the Storage Box**:
   - `foundry-ao` — append-only, used by foundry's daily backup + monthly check
   - `foundry-admin` — full access, **only** used from the laptop for `forget --prune` and restores. Its SSH key never lives on foundry.
-- **Single restic repo** (encrypted with one password). Both subaccounts point at the same directory; the repo encryption password sits in sops and in 1Password.
+- **Single restic repo** (encrypted with one password). Both subaccounts point at the same directory; the repo encryption password sits in sops and in Bitwarden.
 - **Storage Box settings**: **SSH Support on**, **External Reachability off**. Foundry is inside Hetzner's network so port 23 internal is sufficient. Toggle external reachability on temporarily when the laptop needs to prune, or route the laptop's prune through foundry with an SSH jump.
 - **Monthly integrity check** lives in its own `restic-check-foundry.service` / `.timer` (not `checkOpts`) so a bit-rot failure surfaces distinctly from backup failures, and heavy read-sampling doesn't bloat daily runtime.
 
@@ -641,7 +643,7 @@ The current Storage Box is `u580408.your-storagebox.de` (BX11). Both subaccounts
 
 Add these keys to `modules/hosts/foundry/secrets.yaml` via `sops modules/hosts/foundry/secrets.yaml`:
 
-- `restic/password` — a long random string (e.g. `openssl rand -base64 48`). Store the same string in 1Password under "foundry restic repo". **Losing this = losing the backups.**
+- `restic/password` — a long random string (e.g. `openssl rand -base64 48`). Store the same string in Bitwarden under "foundry restic repo". **Losing this = losing the backups.**
 - `restic/ssh_key` — the private half of `storagebox_ao`. Paste the file contents verbatim (sops will encrypt it).
 
 After the first successful deploy, `nix flake check` and `restic snapshots` against the repo will both pass.
@@ -649,7 +651,7 @@ After the first successful deploy, `nix flake check` and `restic snapshots` agai
 **Pruning from the laptop (runs monthly, manual or scripted)**
 
 ```
-# restic password lives in 1Password; copy to a temp file for the invocation
+# restic password lives in Bitwarden; copy to a temp file for the invocation
 op read "op://Personal/foundry restic repo password/password" > /tmp/pw && chmod 600 /tmp/pw
 trap "rm -f /tmp/pw" EXIT
 
