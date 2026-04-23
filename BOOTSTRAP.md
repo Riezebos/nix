@@ -61,8 +61,10 @@ age recipient before the next deploy — otherwise `/run/secrets/*` never
 populate and activation stalls.
 
 ```
-# 1. Derive the new age recipient from the live server host key
-ssh-keyscan -t ed25519 -p 22 foundry 2>/dev/null | ssh-to-age
+# 1. Derive the new age recipient from the live production host key.
+# Main-system sshd lives on 62222; port 22 is Hetzner rescue only and would
+# yield the wrong key here.
+ssh-keyscan -t ed25519 -p 62222 foundry 2>/dev/null | ssh-to-age
 # prints age1...; copy it
 
 # 2. In .sops.yaml, replace the &foundry value with the new recipient
@@ -255,7 +257,7 @@ before you move on — a backup you can't restore is a backup that doesn't exist
 
 ## Hetzner Robot rescue runbook (break-glass)
 
-Use when **both** `ssh foundry` (port 22) and `ssh -p 2222 root@foundry` (initrd)
+Use when **both** `ssh foundry` (port 62222) and `ssh -p 2222 root@foundry` (initrd)
 are unreachable. Rescue is PXE-booted over Hetzner's network, independent of
 anything on the disks or in the NixOS config. It's free and always available;
 paid KVM is only needed if the BIOS itself is unreachable (see "Optional upgrade

@@ -531,7 +531,7 @@ GitHub **secrets** (Settings → Secrets and variables → Actions → Secrets):
 |---|---|---|
 | `FOUNDRY_DEPLOY_KEY` | `deploy.yml` | Contents of `~/.config/foundry-bootstrap/deploy_ed25519` (the private half of the key baked into `configuration.nix` as `users.users.deploy.openssh.authorizedKeys.keys`). |
 | `FOUNDRY_HOST` | `deploy.yml` | The real hostname or IP of `foundry`. Passed via `deploy --hostname …` so the public flake never names it. |
-| `FOUNDRY_KNOWN_HOSTS` | `deploy.yml` | Output of `ssh-keyscan -t ed25519 <foundry-ip>`, run once from a trusted machine. Pins the host key so the CI runner can't TOFU an MITM. |
+| `FOUNDRY_KNOWN_HOSTS` | `deploy.yml` | Output of `ssh-keyscan -t ed25519 -p 62222 <foundry-ip>`, run once from a trusted machine. Pins the production host key so the CI runner can't TOFU an MITM. |
 | `CACHIX_AUTH_TOKEN` | `build.yml`, `deploy.yml` | *(optional)* Cachix push token. Only consulted when the matching variable below is set. |
 
 GitHub **variables** (same page, Variables tab):

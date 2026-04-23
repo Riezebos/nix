@@ -138,7 +138,7 @@ are non-interactive. (Later we can gate this on Touch ID — see
 
 ```bash
 foundry-unlock
-# foundry: passphrase accepted, waiting for sshd on :22...
+# foundry: passphrase accepted, waiting for sshd on :62222...
 # foundry: up.
 ```
 
@@ -147,9 +147,9 @@ The function pipes the passphrase into `systemd-tty-ask-password-agent
 agent reads from `/dev/tty`, not stdin, so the function uses `ssh -tt`
 (force pty allocation even without a local terminal); piped stdin then
 lands in the pty and the agent's `/dev/tty` read picks it up. After
-the prompt is accepted it polls port 22 for up to 120 s and returns
+the prompt is accepted it polls port 62222 for up to 120 s and returns
 when the real sshd is reachable. It also short-circuits with a "nothing
-to do" message if port 22 is already open, so running it twice by
+to do" message if port 62222 is already open, so running it twice by
 accident is harmless.
 
 ### Manual fallback
@@ -160,7 +160,7 @@ by hand:
 ```bash
 ssh -p 2222 root@foundry
 # prompt appears automatically — type the passphrase, hit enter
-# the SSH session closes itself; the real system takes over on port 22
+# the SSH session closes itself; the real system takes over on port 62222
 ```
 
 Any machine with `~/.ssh/id_ed25519` (the `info@datagiant.org` key)

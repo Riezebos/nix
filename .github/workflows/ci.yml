@@ -111,7 +111,7 @@ jobs:
 
       # Pin the host key so the runner can't silently TOFU an MITM.
       # `FOUNDRY_KNOWN_HOSTS` = output of
-      #   ssh-keyscan -t ed25519 <foundry-ip>
+      #   ssh-keyscan -t ed25519 -p 62222 <foundry-ip>
       # run once from a trusted machine.
       - name: Pin host key
         run: |

@@ -165,6 +165,8 @@
     # distinctly from the backup unit (Phase 5 step 6).
     systemd.services.restic-check-foundry = {
       description = "Restic repository integrity check (5% read-sample)";
+      wants = ["network-online.target"];
+      after = ["network-online.target"];
       serviceConfig = {
         Type = "oneshot";
         User = "root";
