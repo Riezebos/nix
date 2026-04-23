@@ -44,9 +44,9 @@ ssh -p 2222 -o StrictHostKeyChecking=accept-new root@foundry
 
 | Port | Service |
 |---|---|
-| 62222 | main-system sshd (`services.openssh.ports` in `modules/hosts/foundry/configuration.nix`). The `Host foundry` block in `~/.ssh/config` must set `Port 62222` — everything in this file and the `foundry-unlock` / `foundry-logs` helpers relies on that. |
+| 62222 | main-system sshd (`services.openssh.ports` in `modules/hosts/foundry/configuration.nix`). The `Host foundry` block in `~/.ssh/config` must set `Port 62222` — the `foundry-unlock` / `foundry-logs` helpers rely on that. |
+| 22 | **transitional** — sshd currently dual-listens on 22 + 62222 so that deploy-rs's magic-rollback confirm hook (which opens a fresh SSH back to the server post-activation) doesn't time out during the port move. Phase 2 drops :22 once CI is updated to `--ssh-opts '-o Port=62222'` and `FOUNDRY_KNOWN_HOSTS` is regenerated at the new port. After phase 2, :22 is reachable **only** when the box is in Hetzner rescue mode — rescue PXE-boots its own kernel so the production firewall is bypassed there. |
 | 2222 | initrd LUKS-unlock sshd (`boot.initrd.network.ssh`) |
-| 22 | **only** reachable when the box is in Hetzner rescue mode — the production firewall keeps :22 closed on the running system. This is deliberate: rescue and prod live on different ports, so their host keys never collide in `known_hosts`. |
 
 User is `root` because initrd has no other accounts; authorisation is by key
 (the keys on `users.users.simon.openssh.authorizedKeys.keys`). If port 2222's
