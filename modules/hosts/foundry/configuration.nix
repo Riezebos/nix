@@ -14,6 +14,9 @@
       self.nixosModules.foundryDisko
       self.nixosModules.foundryvtt
       self.nixosModules.caddy
+      self.nixosModules.authentik
+      self.nixosModules.crowdsec
+      self.nixosModules.postgresql
       self.nixosModules.restic
       self.nixosModules.monitoring
       self.nixosModules.alerting

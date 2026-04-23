@@ -18,6 +18,9 @@ Everything here runs from the laptop unless a step says otherwise.
 | Full-access (admin) Storage Box SSH key | `~/.config/foundry-bootstrap/storagebox_adm` on the laptop. **Never** on foundry, in sops, or in CI |
 | Deploy SSH key (CI → foundry) | `~/.config/foundry-bootstrap/deploy_ed25519` on the laptop; mirrored as a GitHub Actions secret |
 | Initrd SSH host key | `/etc/secrets/initrd/ssh_host_ed25519_key` on foundry, shipped via `nixos-anywhere --extra-files` during install |
+| Authentik secret key | `/var/lib/authentik/secrets/secret-key` on foundry; generated locally on first boot and reused |
+| Grafana OIDC client secret | `/var/lib/authentik/secrets/grafana-oidc-client-secret` on foundry; generated locally on first boot and shared with Grafana |
+| PostgreSQL logical dumps | `/var/backup/postgresql` on foundry; generated daily by `services.postgresqlBackup` and then copied to restic |
 | Hetzner Robot account SSH key | Uploaded separately in Robot's "key management" — controls rescue-system access only |
 | Age recipient for sops | `.sops.yaml` — `&simon` (laptop) + `&foundry` (server's host key → age) |
 
@@ -156,6 +159,31 @@ nix run nixpkgs#restic -- \
     --target /tmp/foundry-journal-restore
 ```
 
+PostgreSQL logical dumps live in the main repo too:
+
+```
+# Re-use the RESTIC_PASSWORD export from the previous block (or re-prompt).
+nix run nixpkgs#restic -- \
+  -o rclone.program="$SB_SSH" \
+  -r rclone:storagebox:foundry \
+  restore latest \
+    --path /var/backup/postgresql \
+    --include /var/backup/postgresql \
+    --target /tmp/foundry-pg-restore
+```
+
+Restored paths:
+
+- `/tmp/foundry-pg-restore/var/backup/postgresql/all.sql.zstd`
+- `/tmp/foundry-pg-restore/var/backup/postgresql/all.prev.sql.zstd`
+
+Restore into a scratch cluster or disposable VM, not the live server:
+
+```
+zstd -dc /tmp/foundry-pg-restore/var/backup/postgresql/all.sql.zstd \
+  | psql postgres
+```
+
 ## Crash analysis (no server required)
 
 Journal is on the Storage Box with ≤15 min lag.
@@ -199,6 +227,76 @@ curl -sG 'http://127.0.0.1:8428/api/v1/query' \
 
 Point a local Grafana at `http://127.0.0.1:8428` as a Prometheus datasource if you
 want graphs; the stock node-exporter dashboard (Grafana.com ID 1860) works unchanged.
+
+## Authentik + Grafana bootstrap
+
+Phase 5f wires up Authentik, Grafana OIDC, and the Caddy vhosts, but Authentik still
+needs one one-time app/provider setup in the admin UI.
+
+1. Deploy Phase 5f and wait for `authentik-server.service` + `authentik-worker.service`
+   to go green.
+2. Open the initial setup flow:
+   ```
+   https://auth.simonito.com/if/flow/initial-setup/
+   ```
+   Keep the trailing slash. Create the first admin user there.
+3. Read the Grafana client secret from the server:
+   ```
+   ssh foundry sudo cat /var/lib/authentik/secrets/grafana-oidc-client-secret
+   ```
+4. In Authentik, create an application/provider pair for Grafana with:
+   - client ID: `grafana`
+   - client secret: the value from the previous step
+   - redirect URI: `https://grafana.simonito.com/login/generic_oauth`
+   - scopes: `openid`, `profile`, `email`
+5. Group-to-role mapping is already baked into Grafana:
+   - `grafana-admins` → `GrafanaAdmin`
+   - `foundry-admins` → `Admin`
+   - everything else → `Viewer`
+6. Test the full login flow at:
+   ```
+   https://grafana.simonito.com
+   ```
+
+Grafana keeps its local login form enabled as a break-glass path while you finish the
+Authentik-side app setup.
+
+## CrowdSec verification
+
+After the first Phase 5f deploy, confirm both log sources and remediation work:
+
+```
+ssh foundry sudo cscli metrics
+ssh foundry sudo cscli acquisitions list
+ssh foundry sudo cscli decisions add --ip 198.51.100.23 --duration 10m --reason phase-5f-test
+ssh foundry sudo nft list ruleset | rg crowdsec
+ssh foundry sudo cscli decisions delete --ip 198.51.100.23
+```
+
+What you want to see:
+
+- `cscli metrics` shows both `journalctl`/`syslog` and Caddy file ingestion.
+- `cscli acquisitions list` includes the SSH journal and `/var/log/caddy/access-*.log`.
+- `nft list ruleset` shows the CrowdSec tables/sets populated by the firewall bouncer.
+
+## PostgreSQL verification
+
+Phase 6 makes PostgreSQL shared infrastructure instead of an Authentik-only detail.
+After the first deploy, verify both provisioning and the logical dump path:
+
+```
+ssh foundry sudo -u postgres psql -tAc '\l'
+ssh foundry sudo systemctl status postgresqlBackup.service --no-pager
+ssh foundry sudo ls -lh /var/backup/postgresql
+ssh foundry sudo -u postgres zstd -dc /var/backup/postgresql/all.sql.zstd | head
+```
+
+What you want to see:
+
+- the `authentik` database still exists in the shared cluster
+- `postgresqlBackup.service` completes successfully
+- `/var/backup/postgresql/all.sql.zstd` exists and is recent
+- the decompressed dump starts with roles / database DDL from `pg_dumpall`
 
 ## Yearly restore drill
 

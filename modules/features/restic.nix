@@ -158,6 +158,28 @@
       };
     };
 
+    # Logical PostgreSQL backup. We snapshot the output produced by the
+    # NixOS `services.postgresqlBackup` module rather than PostgreSQL's live
+    # data dir: app-level restores are simpler, and one dump covers roles +
+    # every database in the shared cluster.
+    services.restic.backups.foundry-postgresql = {
+      repository = "rclone:storagebox:${repoName}";
+      passwordFile = config.sops.secrets."restic/password".path;
+      paths = ["/var/backup/postgresql"];
+      initialize = true;
+      extraOptions = [resticRcloneOption];
+      timerConfig = {
+        OnCalendar = "03:45";
+        RandomizedDelaySec = "10min";
+        Persistent = true;
+      };
+    };
+
+    systemd.services.restic-backups-foundry-postgresql = {
+      after = ["postgresqlBackup.service"];
+      wants = ["postgresqlBackup.service"];
+    };
+
     # Monthly bit-rot sentry. `--read-data-subset=5%` re-downloads 5% of
     # pack files and verifies every pack header + snapshot tree. Over ~20
     # months the whole repo is read at least once. Separate unit so its

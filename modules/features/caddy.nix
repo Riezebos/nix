@@ -1,5 +1,29 @@
 {...}: {
-  flake.nixosModules.caddy = {...}: {
+  flake.nixosModules.caddy = {...}: let
+    commonHeaders = ''
+      header {
+        # 1 year; includeSubDomains is safe for every subdomain here.
+        # `preload` intentionally omitted until the apex is ready for it.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+      }
+    '';
+
+    mkAccessLog = name: ''
+      log {
+        output file /var/log/caddy/access-${name}.log {
+          mode 0640
+          roll_size 25MiB
+          roll_keep 8
+          roll_keep_for 720h
+        }
+        format json
+      }
+    '';
+  in {
     services.caddy = {
       enable = true;
 
@@ -10,23 +34,45 @@
 
       virtualHosts."foundry.simonito.com".extraConfig = ''
         encode zstd gzip
+        ${mkAccessLog "foundry"}
 
         reverse_proxy 127.0.0.1:30012
 
-        header {
-          # 1 year; includeSubDomains is safe — simonito.com is only
-          # hosting this vhost. `preload` intentionally omitted until
-          # the apex is on the HSTS preload list.
-          Strict-Transport-Security "max-age=31536000; includeSubDomains"
-          # Foundry's scene/journal editors render in same-origin iframes,
-          # so DENY would break them. SAMEORIGIN is the tightest that
-          # keeps the app functional.
-          X-Frame-Options "SAMEORIGIN"
-          X-Content-Type-Options "nosniff"
-          Referrer-Policy "strict-origin-when-cross-origin"
-          # Strip the Caddy version banner.
-          -Server
-        }
+        # Foundry's scene/journal editors render in same-origin iframes,
+        # so DENY would break them. SAMEORIGIN is the tightest that keeps
+        # the app functional.
+        ${commonHeaders}
+      '';
+
+      virtualHosts."grafana.simonito.com".extraConfig = ''
+        encode zstd gzip
+        ${mkAccessLog "grafana"}
+
+        reverse_proxy 127.0.0.1:3000
+
+        ${commonHeaders}
+      '';
+
+      virtualHosts."auth.simonito.com".extraConfig = ''
+        encode zstd gzip
+        ${mkAccessLog "auth"}
+
+        reverse_proxy 127.0.0.1:9000
+
+        ${commonHeaders}
+
+        # Future non-OIDC admin UIs should use Authentik's embedded proxy
+        # outpost with Caddy forward_auth instead of growing their own auth:
+        #
+        # route {
+        #   reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
+        #   forward_auth 127.0.0.1:9000 {
+        #     uri /outpost.goauthentik.io/auth/caddy
+        #     copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid X-Authentik-Jwt X-Authentik-Meta-Jwks X-Authentik-Meta-Outpost X-Authentik-Meta-Provider X-Authentik-Meta-App X-Authentik-Meta-Version
+        #     trusted_proxies private_ranges
+        #   }
+        #   reverse_proxy 127.0.0.1:<app-port>
+        # }
       '';
     };
 

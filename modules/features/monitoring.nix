@@ -5,11 +5,9 @@
     lib,
     ...
   }: let
-    # Every service binds on 127.0.0.1 exclusively. Remote access is via
-    # `ssh -L` until Phase 4's Authentik + Caddy forward_auth lands — at that
-    # point Grafana will get a `grafana.foundry.simonito.com` vhost behind
-    # Authentik. Exposing Grafana or VictoriaMetrics publicly without an auth
-    # proxy would be a standing-open admin surface; not worth it for one user.
+    # Loki and VictoriaMetrics stay loopback-only even after Phase 5f; Grafana
+    # is the public, authenticated front door and proxies both datasources
+    # server-side. This keeps the raw stores off the internet entirely.
     bindHost = "127.0.0.1";
     vmPort = 8428;
     lokiPort = 3100;
@@ -203,24 +201,16 @@
     '';
 
     # ---------------- Dashboard ----------------
-    # Grafana sits on localhost only; reach it via
-    #   ssh -L 3000:127.0.0.1:3000 foundry
-    # until the Authentik forward_auth story from Phase 4 lands, at which
-    # point the Caddy vhost comment in modules/features/caddy.nix will
-    # grow a second block for grafana.foundry.simonito.com.
+    # Grafana still listens on localhost only; Caddy publishes it at
+    # `grafana.simonito.com` and Authentik handles login via native OIDC.
     services.grafana = {
       enable = true;
       settings = {
         server = {
           http_addr = bindHost;
           http_port = grafanaPort;
-          # Once a public vhost exists, set `domain` and `root_url` so
-          # invite/reset links are correct. Leaving them at defaults is
-          # fine for the SSH-tunnel access pattern.
         };
         analytics.reporting_enabled = false;
-        # No public sign-up; admin user is bootstrapped by the module
-        # (default login admin / admin, forced to reset on first login).
         users.allow_sign_up = false;
         "auth.anonymous".enabled = false;
       };

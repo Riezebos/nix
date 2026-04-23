@@ -57,6 +57,8 @@
     failOnly = {
       foundryvtt = "foundryvtt";
       caddy = "caddy";
+      "authentik-server" = "authentik-server";
+      "authentik-worker" = "authentik-worker";
       loki = "loki";
       grafana = "grafana";
       victoriametrics = "victoriametrics";
@@ -122,6 +124,15 @@
             serviceConfig = {
               EnvironmentFile = healthchecksEnvFile;
               ExecStartPost = "${healthchecksPing} journal-backup";
+            };
+          };
+
+        restic-backups-foundry-postgresql =
+          onFailureHook "postgresql-backup"
+          // {
+            serviceConfig = {
+              EnvironmentFile = healthchecksEnvFile;
+              ExecStartPost = "${healthchecksPing} postgresql-backup";
             };
           };
 
