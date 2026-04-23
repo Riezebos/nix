@@ -23,7 +23,12 @@ in {
     # fresh CI runner, then fail if the remote key changes. The CI
     # workflow seeds known_hosts explicitly before this runs, so this is
     # mostly a safety net.
-    sshOpts = ["-o" "StrictHostKeyChecking=accept-new"];
+    # `Port=62222` — main-system sshd runs here (see
+    # `services.openssh.ports` in modules/hosts/foundry/configuration.nix).
+    # Applies to both the nix-copy-closure step and deploy-rs's magic-
+    # rollback confirm hook, so confirmation over ssh reaches the new
+    # sshd after the firewall reload.
+    sshOpts = ["-o" "StrictHostKeyChecking=accept-new" "-o" "Port=62222"];
 
     nodes.foundry = {
       # Placeholder. The real hostname/IP is not in this public repo; the

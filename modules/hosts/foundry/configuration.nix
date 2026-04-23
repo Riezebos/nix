@@ -107,20 +107,11 @@
       #      PXE-booted and always listens on 22. Keeping our sshd off 22
       #      means no host-key collisions in known_hosts when switching
       #      between the two (no more `ssh-keygen -R foundry` dance).
-      # This is security-by-obscurity for bot noise only — the real gate is
-      # still key-only auth + MaxAuthTries + AllowUsers. Port 2222 is the
-      # initrd LUKS-unlock sshd; keep it distinct from this one.
-      #
-      # MIGRATION STATE (phase 1 of 2): sshd dual-listens on 22 and 62222.
-      # Required because deploy-rs's magic-rollback confirm hook opens a
-      # second SSH connection post-activation: without dual-listen, the
-      # firewall reload drops :22 and the confirm times out → auto-rollback
-      # (observed 2026-04-23 on run 24846107674).
-      # Phase 2 (follow-up commit, once this lands and CI is updated to
-      # `--ssh-opts '-o Port=62222'`): drop 22 from `ports` and from the
-      # firewall allow-list below, regenerate FOUNDRY_KNOWN_HOSTS via
-      # `ssh-keyscan -p 62222 -t ed25519 <ip>`.
-      ports = [22 62222];
+      # This is security-by-obscurity for bot noise only — the real gate
+      # is still key-only auth + MaxAuthTries + AllowUsers. Port 2222 is
+      # the initrd LUKS-unlock sshd; keep it distinct from this one.
+      # deploy-rs must match via `sshOpts` in modules/deploy.nix.
+      ports = [62222];
       settings = {
         PasswordAuthentication = false;
         PermitRootLogin = "no";
@@ -133,23 +124,24 @@
     # Explicit firewall allow-list so the public surface is visible in
     # one place instead of implicit through `openFirewall` toggles on
     # individual modules.
-    #   - 22, 62222: main-system sshd (see `services.openssh.ports` above
-    #            for the migration state). The openssh module's
-    #            `openFirewall = true` already opens whatever is in
-    #            `ports`; listed here explicitly so the public surface is
-    #            visible in one place.
+    #   - 62222: main-system sshd (see `services.openssh.ports` above).
+    #            The openssh module's `openFirewall = true` already opens
+    #            whatever is in `ports`; listed here explicitly so the
+    #            public surface is visible in one place.
     #   - 2222 : initrd LUKS-unlock sshd. The main-system firewall is
     #            inactive during initrd, so this rule is a defensive
     #            no-op post-boot — but listing it makes the intent
     #            explicit for anyone reading the config.
     #   - 80/443 are added by self.nixosModules.caddy (Phase 4) so the
     #            port list lives next to the service that needs it.
-    # Phase 2: remove 22 from both lists — Hetzner rescue PXE-boots its
+    # Port 22 is deliberately NOT opened. Hetzner rescue PXE-boots its
     # own kernel so the production firewall is bypassed while rescue
-    # runs; :22 is reachable there regardless.
+    # runs — :22 is reachable there regardless. On the running system,
+    # :22 stays closed, which also means prod and rescue have disjoint
+    # known_hosts entries and never collide.
     networking.firewall = {
       enable = true;
-      allowedTCPPorts = [22 62222 2222];
+      allowedTCPPorts = [62222 2222];
     };
 
     # Phase 1c: unattended security updates. `operation = "boot"` stages
