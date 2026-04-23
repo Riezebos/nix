@@ -16,6 +16,7 @@
       self.nixosModules.caddy
       self.nixosModules.restic
       self.nixosModules.monitoring
+      self.nixosModules.alerting
       inputs.disko.nixosModules.disko
       inputs.sops-nix.nixosModules.sops
     ];
