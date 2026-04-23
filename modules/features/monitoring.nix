@@ -64,6 +64,15 @@
         };
 
         common = {
+          # Top-level `common.instance_addr` is the documented way to
+          # pin every component's advertise address at once — memberlist,
+          # ingester, compactor, frontend, scheduler all inherit it.
+          # Setting `common.ring.instance_addr` on its own (which was
+          # the obvious-looking option) covers only the default ring;
+          # per-module rings still fall back to probing eth0/en0/lo.
+          # See JayRovacsek/nix-config modules/loki/default.nix for the
+          # canonical minimal-working single-binary pattern.
+          instance_addr = bindHost;
           path_prefix = "/var/lib/loki";
           replication_factor = 1;
           ring = {
@@ -88,6 +97,13 @@
           bind_addr = [bindHost];
           advertise_addr = bindHost;
         };
+
+        # Same "probe eth0/en0/lo, reject if only lo is populated" pattern
+        # that broke memberlist also breaks the query-frontend module.
+        # In single-binary mode there's no external frontend to reach,
+        # but Loki still initializes the module and refuses to start if
+        # it can't resolve an advertise address. Pin it explicitly.
+        frontend.address = bindHost;
 
         schema_config.configs = [
           {
