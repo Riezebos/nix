@@ -19,7 +19,7 @@ Everything here runs from the laptop unless a step says otherwise.
 | Deploy SSH key (CI → foundry) | `~/.config/foundry-bootstrap/deploy_ed25519` on the laptop; mirrored as a GitHub Actions secret |
 | Initrd SSH host key | `/etc/secrets/initrd/ssh_host_ed25519_key` on foundry, shipped via `nixos-anywhere --extra-files` during install |
 | Authentik secret key | `/var/lib/authentik/secrets/secret-key` on foundry; generated locally on first boot and reused |
-| Grafana OIDC client secret | `/var/lib/authentik/secrets/grafana-oidc-client-secret` on foundry; generated locally on first boot and shared with Grafana |
+| Grafana OIDC client secret | `/var/lib/grafana/secrets/grafana-oidc-client-secret` on foundry; generated locally on first boot and read by Grafana |
 | PostgreSQL logical dumps | `/var/backup/postgresql` on foundry; generated daily by `services.postgresqlBackup` and then copied to restic |
 | Hetzner Robot account SSH key | Uploaded separately in Robot's "key management" — controls rescue-system access only |
 | Age recipient for sops | `.sops.yaml` — `&simon` (laptop) + `&foundry` (server's host key → age) |
@@ -242,7 +242,7 @@ needs one one-time app/provider setup in the admin UI.
    Keep the trailing slash. Create the first admin user there.
 3. Read the Grafana client secret from the server:
    ```
-   ssh foundry sudo cat /var/lib/authentik/secrets/grafana-oidc-client-secret
+   ssh foundry sudo cat /var/lib/grafana/secrets/grafana-oidc-client-secret
    ```
 4. In Authentik, create an application/provider pair for Grafana with:
    - client ID: `grafana`

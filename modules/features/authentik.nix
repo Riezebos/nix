@@ -14,7 +14,8 @@
     secretDir = "${dataDir}/secrets";
     storageDir = "${dataDir}/storage";
     secretKeyPath = "${secretDir}/secret-key";
-    grafanaClientSecretPath = "${secretDir}/grafana-oidc-client-secret";
+    grafanaSecretDir = "/var/lib/grafana/secrets";
+    grafanaClientSecretPath = "${grafanaSecretDir}/grafana-oidc-client-secret";
 
     prepareSecrets = pkgs.writeShellScript "authentik-prepare-secrets" ''
       set -euo pipefail
@@ -23,6 +24,7 @@
         ${dataDir} \
         ${secretDir} \
         ${storageDir}
+      install -d -m 0750 -o grafana -g grafana ${grafanaSecretDir}
 
       if [ ! -s ${secretKeyPath} ]; then
         ${pkgs.openssl}/bin/openssl rand -base64 60 | tr -d '\n' > ${secretKeyPath}
@@ -34,7 +36,7 @@
       if [ ! -s ${grafanaClientSecretPath} ]; then
         ${pkgs.openssl}/bin/openssl rand -base64 36 | tr -d '\n' > ${grafanaClientSecretPath}
         printf '\n' >> ${grafanaClientSecretPath}
-        chown authentik:authentik ${grafanaClientSecretPath}
+        chown grafana:grafana ${grafanaClientSecretPath}
         chmod 0400 ${grafanaClientSecretPath}
       fi
     '';
@@ -186,7 +188,7 @@
 
     # Grafana is the first native OIDC target. The provider/application pair
     # still needs to be created once inside Authentik, but the client secret is
-    # already persisted locally so Grafana and Authentik can share it.
+    # already persisted locally in Grafana's state dir so the app can read it.
     services.grafana.settings = {
       server = {
         domain = "grafana.simonito.com";

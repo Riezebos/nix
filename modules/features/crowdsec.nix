@@ -41,9 +41,10 @@
       settings.mode = "nftables";
     };
 
-    # Keep the service users stable so group-based access to Caddy's on-disk
-    # logs is predictable, and work around the current state-dir permission
-    # issue seen by other NixOS users.
+    # Keep the CrowdSec engine user stable so group-based access to Caddy's
+    # on-disk logs is predictable, and work around the current state-dir
+    # permission issue seen by other NixOS users. Leave the bouncer units on
+    # their upstream defaults so systemd credentials keep working.
     users.users.crowdsec.extraGroups = [
       "systemd-journal"
       "caddy"
@@ -53,8 +54,5 @@
       DynamicUser = lib.mkForce false;
       StateDirectory = lib.mkForce "crowdsec";
     };
-
-    systemd.services.crowdsec-firewall-bouncer.serviceConfig.DynamicUser = lib.mkForce false;
-    systemd.services.crowdsec-firewall-bouncer-register.serviceConfig.DynamicUser = lib.mkForce false;
   };
 }
