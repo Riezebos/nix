@@ -30,7 +30,7 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): module landed 2026-04-22 (`modules/features/monitoring.nix`). All services bound to 127.0.0.1 — access Grafana via `ssh -L 3000:127.0.0.1:3000 foundry` until the Authentik forward_auth story from Phase 4 lands and a `grafana.foundry.simonito.com` Caddy vhost can replace the tunnel.
 - **Phase 5c** (monitoring backup + crash-analysis tooling): module landed 2026-04-22. Daily restic now wraps a VictoriaMetrics `/snapshot/create` in `backupPrepareCommand` and includes `/var/lib/victoriametrics/snapshots` + `/var/lib/loki`; new `services.restic.backups.foundry-journal` pushes `/var/log/journal` to `rclone:storagebox:foundry-journal` every 15 min; `foundry-logs` zsh helper (in `modules/home/shared.nix`) restores the latest journal snapshot via the admin credential and pipes it to `journalctl --file`.
 - **Phase 5d** (alerting — Healthchecks.io + Alertmanager): module landed 2026-04-23 (`modules/features/alerting.nix`). `healthchecks-fail@<slug>.service` template wired into foundryvtt, caddy, loki, grafana, victoriametrics, alloy (fail-only) and the three restic units (fail + success ping for dead-man-switch). **Goes live after**: (1) sign up at healthchecks.io (free tier), (2) in the default Project → Project Settings → click Create Ping Key and copy it, (3) `sops modules/hosts/foundry/secrets.yaml` → add `healthchecks.pingkey: <key>`. Auto-provisioning is a per-request flag (`?create=1`) not a project setting — the `healthchecks-ping` helper appends it unconditionally. First run of each unit will auto-provision its Healthchecks.io check; tune cadence/grace per check in the Healthchecks.io UI afterwards (suggested: `daily-backup` 1d/6h, `journal-backup` 1h/30m, `restic-check` 31d/1d, long-running services "simple" mode without heartbeat). Alertmanager for VictoriaMetrics rule evaluations is deferred to a later pass.
-- **Phase 5e** (restore drill + BOOTSTRAP.md): pending.
+- **Phase 5e** (restore drill + BOOTSTRAP.md): `BOOTSTRAP.md` landed 2026-04-23. Restore drill is a **manual** step — run the "Yearly restore drill" section of BOOTSTRAP.md once now (FoundryVTT data intact + `foundry-logs` + local VictoriaMetrics against the restored snapshot) and schedule a yearly calendar reminder.
 
 Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
 
@@ -269,7 +269,7 @@ Constraints imposed by the hardware inventory: **no TPM available**, **Legacy BI
    ```
    The SSH session closes itself once the real system takes over — that's expected.
 6. Commit the generated `hardware-configuration.nix` and the confirmed NIC kernel module (adjust `boot.initrd.availableKernelModules` if it shows a different driver than `e1000e`).
-7. Do one full reboot cycle (`ssh deploy@<server> sudo reboot`) and confirm you can unlock via `ssh -p 2222` and the box comes back up on port 22. This validates the whole boot path end-to-end before you put any secrets or services on it.
+7. Do one full reboot cycle (`ssh deploy@<server> sudo reboot`) and confirm you can unlock via `ssh -p 2222` and the box comes back up on its main sshd port (`services.openssh.ports`, currently 62222 — see Phase 1c-1). This validates the whole boot path end-to-end before you put any secrets or services on it.
 8. **Store the LUKS passphrase in your password manager** — there is no hardware-assisted recovery path. If you lose it, the disks are a brick and you reinstall.
 9. Record the unlock procedure in `BOOTSTRAP.md` (Phase 5 step 11): the SSH command, the port, which user, where the passphrase lives.
 
@@ -325,6 +325,7 @@ In `modules/hosts/foundry/configuration.nix`:
 ```nix
 services.openssh = {
   enable = true;
+  ports = [ 62222 ];
   settings = {
     PasswordAuthentication = false;
     PermitRootLogin = "no";
@@ -335,19 +336,20 @@ services.openssh = {
 };
 ```
 
-Key-only auth, `root` login off, tight `AllowUsers` — the bare-minimum settings that retire SSH brute force and account probing as meaningful threats.
+Key-only auth, `root` login off, tight `AllowUsers`, non-standard port — the first three retire SSH brute force and account probing as meaningful threats; the port move is additional bot-noise reduction AND the clean split from Hetzner rescue (which always runs on :22). With prod on :62222 and rescue on :22, the two have disjoint `known_hosts` entries and never need an `ssh-keygen -R` dance when switching between them.
 
 **1c-2: Explicit firewall allow-list**
 
 ```nix
 networking.firewall = {
   enable = true;
-  allowedTCPPorts = [ 22 2222 ];
+  allowedTCPPorts = [ 62222 2222 ];
 };
 ```
 
-- `22`: SSH. The `services.openssh` module also adds this via `openFirewall = true` by default — listed here explicitly so the public surface is visible in one place.
+- `62222`: main-system SSH (per `services.openssh.ports` above). The openssh module's `openFirewall = true` already opens whatever is configured in `ports`; listed here explicitly so the public surface is visible in one place.
 - `2222`: initrd LUKS-unlock sshd. The main-system firewall is inactive during initrd, so this rule is a defensive no-op post-boot — but listing it documents intent.
+- `22` is deliberately NOT opened. Rescue mode PXE-boots its own kernel, so the production firewall is bypassed while rescue runs — :22 is reachable there regardless. On the running system, :22 stays closed.
 - Phase 4 will add `80` and `443` when Caddy goes up.
 
 **1c-3: Unattended security updates**
@@ -413,7 +415,7 @@ Defense in depth: nspawn handles coarse isolation (filesystem, PID, cgroup); sys
 
 1. Normal: `ssh foundry`.
 2. LUKS: `foundry-unlock` → `ssh -p 2222 root@<public IP>` (initrd).
-3. Break-glass: Hetzner Robot rescue → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix, *or* `nixos-anywhere --flake .#foundry` for a clean reinstall followed by a restic restore.
+3. Break-glass: Hetzner Robot rescue → `mdadm --assemble --scan` → `cryptsetup open /dev/md/root cryptroot` → mount → fix, *or* `nixos-anywhere --flake .#foundry` for a clean reinstall followed by a restic restore. (LUKS sits on the mdraid array, not a GPT partition — `by-partlabel/cryptroot` doesn't exist; see disko.nix. Full runbook lives in BOOTSTRAP.md.)
 
 End-to-end reinstall to a fresh box: ~1-2 hours. No mesh enrollment, no SSO dance. This is the trade we made by keeping SSH public — recovery stays scripted and dependency-free.
 
@@ -839,7 +841,7 @@ With CI/CD, sops secrets, backups, and monitoring in place, adding any new app i
 - **CI runner**: GitHub Actions works out of the box for your public repo. If you later want self-hosted CI on the server, that's a Phase 8 add-on.
 - **Secrets hygiene**: gitleaks runs as a pre-commit hook (Phase 0d, declarative via `git-hooks.nix`) and re-runs in CI via `nix flake check` (Phase 3a). After adding any secret also do a manual `git grep` for the value to be sure.
 - **Machine identity stays on the laptop, not in the repo**: server IPs, MAC addresses, private internal URLs live in `~/.ssh/config` (`Host foundry` from Phase 0a) and in sops — never in `modules/` or the `.md` files. The flake refers to the box as `foundry`; `foundry-unlock` resolves the real IP via `ssh -G foundry` at runtime. This repo is public; anyone who clones it should not learn which IP to start probing. Gitleaks **won't** catch IPs or hostnames — this is a discipline thing, not a tooling thing.
-- **Break-glass recovery**: the paths back into the box are (a) `ssh foundry` (public :22), (b) the initrd sshd on :2222 during a boot, (c) **Hetzner Robot's rescue system** if both of the above fail. Rescue is free and always available — PXE-booted over Hetzner's network, independent of anything on the disks or in the NixOS config. From rescue: `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` (passphrase from password manager) → `mdadm --assemble --scan` → mount → fix, or `nixos-anywhere --flake .#foundry` for a clean reinstall. Accept rescue as *the* fallback — don't try to engineer a "backup public SSH from my home IP" allow-rule, it'll rot. Make sure your Hetzner Robot login, its 2FA recovery codes, and the LUKS passphrase all live in a password manager you can reach from a phone. Paid KVM (~€25) is a different tool, needed only if the *BIOS itself* becomes unreachable — see Phase 1's "Future upgrade path".
+- **Break-glass recovery**: the paths back into the box are (a) `ssh foundry` (public sshd — port 62222, see Phase 1c-1), (b) the initrd sshd on :2222 during a boot, (c) **Hetzner Robot's rescue system** (which brings up its own sshd on :22) if both of the above fail. Rescue is free and always available — PXE-booted over Hetzner's network, independent of anything on the disks or in the NixOS config. From rescue: `mdadm --assemble --scan` → `cryptsetup open /dev/md/root cryptroot` (passphrase from password manager) → mount → fix, or `nixos-anywhere --flake .#foundry` for a clean reinstall. LUKS sits on the mdraid array, not a GPT partition — RAID assembly must come before cryptsetup. Full runbook in BOOTSTRAP.md. Accept rescue as *the* fallback — don't try to engineer a "backup public SSH from my home IP" allow-rule, it'll rot. Make sure your Hetzner Robot login, its 2FA recovery codes, and the LUKS passphrase all live in a password manager you can reach from a phone. Paid KVM (~€25) is a different tool, needed only if the *BIOS itself* becomes unreachable — see Phase 1's "Future upgrade path".
 - **Things that would break the free rescue path** (short list, for paranoia): (1) messing with BIOS boot order so network boot / PXE is disabled — we have no BIOS access on this box, so we literally can't do this by accident; (2) letting the SSH public key registered in Hetzner Robot drift out of sync with what's on the laptop — rescue authorizes whichever key is in Robot at activation time, so when you rotate the laptop's key, update Robot's copy at the same time; (3) losing access to the Robot account (password + 2FA). None of these are normal-operations risks; all three are checklist items for `BOOTSTRAP.md` (Phase 5 step 11).
 - **Don't build Phase 3 before Phase 1 works end-to-end.** The temptation to "just set up CI first" is real, but you need a working server to deploy to.
 - **Step by step means step by step**: after each phase, commit, push, and *actually wait a day* using the system before moving on. You'll catch issues you'd miss in a marathon setup.

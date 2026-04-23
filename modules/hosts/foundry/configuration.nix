@@ -101,6 +101,16 @@
     # at the network layer.
     services.openssh = {
       enable = true;
+      # Non-standard port for the running system. Two reasons:
+      #   1. Drops bot scan traffic to ~0 — opportunistic scanners hit 22.
+      #   2. Leaves port 22 free for Hetzner Robot's rescue system, which is
+      #      PXE-booted and always listens on 22. Keeping our sshd off 22
+      #      means no host-key collisions in known_hosts when switching
+      #      between the two (no more `ssh-keygen -R foundry` dance).
+      # This is security-by-obscurity for bot noise only — the real gate is
+      # still key-only auth + MaxAuthTries + AllowUsers. Port 2222 is the
+      # initrd LUKS-unlock sshd; keep it distinct from this one.
+      ports = [62222];
       settings = {
         PasswordAuthentication = false;
         PermitRootLogin = "no";
@@ -113,17 +123,21 @@
     # Explicit firewall allow-list so the public surface is visible in
     # one place instead of implicit through `openFirewall` toggles on
     # individual modules.
-    #   - 22   : SSH (added by `services.openssh` via its default
-    #            openFirewall = true — listed here for documentation).
+    #   - 62222: main-system sshd (see `services.openssh.ports` above;
+    #            added here for documentation — `openFirewall = true` on
+    #            the openssh module already opens whatever is in `ports`).
     #   - 2222 : initrd LUKS-unlock sshd. The main-system firewall is
     #            inactive during initrd, so this rule is a defensive
     #            no-op post-boot — but listing it makes the intent
     #            explicit for anyone reading the config.
     #   - 80/443 are added by self.nixosModules.caddy (Phase 4) so the
     #            port list lives next to the service that needs it.
+    # Port 22 is deliberately NOT opened — Hetzner rescue still uses 22,
+    # but rescue PXE-boots its own kernel so the production firewall is
+    # inactive in that mode. On the running system, :22 stays closed.
     networking.firewall = {
       enable = true;
-      allowedTCPPorts = [22 2222];
+      allowedTCPPorts = [62222 2222];
     };
 
     # Phase 1c: unattended security updates. `operation = "boot"` stages

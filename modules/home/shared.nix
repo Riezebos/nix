@@ -379,15 +379,21 @@
           foundry-unlock() {
               emulate -L zsh
               local ssh_host=foundry
+              # Keep in sync with services.openssh.ports in
+              # modules/hosts/foundry/configuration.nix. The main sshd lives
+              # on a non-standard port so the production system and Hetzner
+              # rescue (always on :22) have disjoint host-key state; port
+              # 2222 is the initrd LUKS-unlock sshd.
+              local main_port=62222
               local ip pw rc
               ip=$(ssh -G "$ssh_host" 2>/dev/null | awk '/^hostname /{print $2; exit}')
               if [[ -z "$ip" || "$ip" == "$ssh_host" ]]; then
                   print -u2 "foundry-unlock: '$ssh_host' is not configured in ~/.ssh/config."
-                  print -u2 "  Add a 'Host foundry' block with HostName set to the server IP."
+                  print -u2 "  Add a 'Host foundry' block with HostName set to the server IP and Port $main_port."
                   return 1
               fi
-              if nc -z -G 2 "$ip" 22 >/dev/null 2>&1; then
-                  print "foundry: already up (port 22 open). Nothing to do."
+              if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
+                  print "foundry: already up (port $main_port open). Nothing to do."
                   return 0
               fi
               if ! pw=$(security find-generic-password -a foundry -s foundry-luks -w 2>/dev/null); then
@@ -408,16 +414,16 @@
                   print -u2 "foundry-unlock: ssh to initrd returned $rc (wrong passphrase? initrd not up?)"
                   return $rc
               fi
-              print "foundry: passphrase accepted, waiting for sshd on :22..."
+              print "foundry: passphrase accepted, waiting for sshd on :$main_port..."
               local i
               for i in $(seq 1 60); do
-                  if nc -z -G 2 "$ip" 22 >/dev/null 2>&1; then
+                  if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
                       print "foundry: up."
                       return 0
                   fi
                   sleep 2
               done
-              print -u2 "foundry: port 22 still closed after 120s — check the console."
+              print -u2 "foundry: port $main_port still closed after 120s — check the console."
               return 2
           }
 
