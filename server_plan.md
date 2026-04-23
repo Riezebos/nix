@@ -17,7 +17,7 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **TPM**: motherboard has a TPM header (SMBIOS port designator "TPM"), but no TPM device is present or active (`modprobe tpm_crb` / `tpm_tis` find nothing; `/dev/tpm*` does not exist). Intel PTT (firmware TPM, supported by the C246 chipset) is disabled in BIOS. Without BIOS access, no TPM.
 - **Conclusion**: this plan commits to **Legacy BIOS + GRUB + LUKS + SSH-in-initrd unlock** (no TPM auto-unlock). See Phase 1. A future BIOS-toggling session (UEFI + PTT + Secure Boot + TPM-bound unlock) is recorded as an optional upgrade path but not required.
 
-**Rollout progress (as of 2026-04-20)**
+**Rollout progress (as of 2026-04-23)**
 
 - **Phase 0** (repo restructure + local tooling): done. Repo uses import-tree / flake-parts; gitleaks pre-commit active.
 - **Phase 1** (bare NixOS install + mdraid RAID1 + LUKS + SSH-initrd unlock): done. Box boots and reboots clean.
@@ -26,13 +26,14 @@ This section records the concrete hardware reality this plan is tailored to. If 
 - **Phase 2** (sops-nix): done. Smoke-test secret is provisioned and decrypting at activation time.
 - **Phase 3** (GitHub Actions CI + deploy-rs + weekly flake-lock PR): workflows and `modules/deploy.nix` landed 2026-04-20. Goes live on push to main once the repo secrets/vars listed under "Phase 3 — required repo config" are set.
 - **Phase 4** (Foundry VTT + Caddy reverse proxy): done (commit `4f2ac91`).
-- **Phase 5a** (append-only restic to Hetzner Storage Box): module landed 2026-04-21 (`modules/features/restic.nix`). Goes live after the Storage Box is provisioned, the `FILLME` placeholders are filled in, and sops secrets are added — see "Storage Box provisioning" below.
-- **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): module landed 2026-04-22 (`modules/features/monitoring.nix`). All services bound to 127.0.0.1 — access Grafana via `ssh -L 3000:127.0.0.1:3000 foundry` until the Authentik forward_auth story from Phase 4 lands and a `grafana.foundry.simonito.com` Caddy vhost can replace the tunnel.
+- **Phase 5a** (append-only restic to Hetzner Storage Box): done 2026-04-21. `modules/features/restic.nix` is deployed and the Storage Box + sops wiring are in place.
+- **Phase 5b** (monitoring stack — VictoriaMetrics + Loki + Alloy + Grafana): done 2026-04-22 (`modules/features/monitoring.nix`). All services bind to 127.0.0.1. Grafana currently rides an SSH tunnel; Phase 5f is the follow-up that decides which admin UIs get native OIDC, which stay private, and where `forward_auth` belongs.
 - **Phase 5c** (monitoring backup + crash-analysis tooling): module landed 2026-04-22. Daily restic now wraps a VictoriaMetrics `/snapshot/create` in `backupPrepareCommand` and includes `/var/lib/victoriametrics/snapshots` + `/var/lib/loki`; new `services.restic.backups.foundry-journal` pushes `/var/log/journal` every 15 min; `foundry-logs` zsh helper (in `modules/home/shared.nix`) restores the latest journal snapshot via the admin credential and pipes it to `journalctl --file`. **Corrections (surfaced 2026-04-23 during Phase 5e's drill):**
 1. The plan called for two distinct repos (`foundry` and `foundry-journal`), but the Storage Box's forced command hard-codes `./` so both rclone URLs resolve to the same underlying restic repo. Functionality is unchanged — snapshots carry their source path as metadata, so `restore --path <p>` disambiguates — but "two repos" is a naming fiction. `foundry-logs` and BOOTSTRAP.md now pass `--path /var/log/journal` / `--path /var/lib/foundryvtt` explicitly. True isolation would require separate Storage Box subaccounts with forced commands pinning different paths; deferred as not worth it for single-admin ops.
 2. Backing up only `/var/lib/victoriametrics/snapshots/` captured dangling pointers. VM's `/snapshot/create` builds `snapshots/<name>/data/{small,big,indexdb}` as RELATIVE SYMLINKS back into `/var/lib/victoriametrics/data/<table>/snapshots/<name>/`, which wasn't in the restic path list. Fix (restic.nix): back up the whole `/var/lib/victoriametrics` tree. The `backupPrepareCommand` snapshot is still useful as a point-in-time anchor inside the captured tree; the live `data/` dir comes along for free and VM's part files are immutable once written, so the backup is effectively consistent even against concurrent scrapes. Cost is small (VM data is tens of MB/year on this box) and restic dedup keeps run-over-run delta near zero.
-- **Phase 5d** (alerting — Healthchecks.io + Alertmanager): module landed 2026-04-23 (`modules/features/alerting.nix`). `healthchecks-fail@<slug>.service` template wired into foundryvtt, caddy, loki, grafana, victoriametrics, alloy (fail-only) and the three restic units (fail + success ping for dead-man-switch). **Goes live after**: (1) sign up at healthchecks.io (free tier), (2) in the default Project → Project Settings → click Create Ping Key and copy it, (3) `sops modules/hosts/foundry/secrets.yaml` → add `healthchecks.pingkey: <key>`. Auto-provisioning is a per-request flag (`?create=1`) not a project setting — the `healthchecks-ping` helper appends it unconditionally. First run of each unit will auto-provision its Healthchecks.io check; tune cadence/grace per check in the Healthchecks.io UI afterwards (suggested: `daily-backup` 1d/6h, `journal-backup` 1h/30m, `restic-check` 31d/1d, long-running services "simple" mode without heartbeat). Alertmanager for VictoriaMetrics rule evaluations is deferred to a later pass.
-- **Phase 5e** (restore drill + BOOTSTRAP.md): `BOOTSTRAP.md` landed 2026-04-23. Restore drill is a **manual** step — run the "Yearly restore drill" section of BOOTSTRAP.md once now (FoundryVTT data intact + `foundry-logs` + local VictoriaMetrics against the restored snapshot) and schedule a yearly calendar reminder.
+- **Phase 5d** (alerting — Healthchecks.io + Alertmanager): done 2026-04-23 (`modules/features/alerting.nix`). `healthchecks-fail@<slug>.service` is wired into foundryvtt, caddy, loki, grafana, victoriametrics, alloy (fail-only) and the three restic units (fail + success ping for dead-man-switch). Healthchecks.io is provisioned; Alertmanager for VictoriaMetrics rule evaluations remains deferred.
+- **Phase 5e** (restore drill + BOOTSTRAP.md): done 2026-04-23. `BOOTSTRAP.md` landed and the restore drill completed successfully; rerun the "Yearly restore drill" section once a year and keep the reminder current.
+- **Phase 5f** (admin auth + exposure model): planned next. Foundry stays publicly reachable and uses Foundry's own username/password auth; add Authentik where services support native auth (Grafana first), keep raw observability backends private by default, and end the phase by enabling CrowdSec with the local engine + firewall bouncer for SSH/Caddy edge protection.
 
 Keep this block current — one line per phase, updated when a phase flips from pending → deployed or when the approach changes.
 
@@ -373,17 +374,17 @@ system.autoUpgrade = {
 
 Key-only SSH has no brute-forceable surface. The real rate-limit targets will be Foundry's HTTP login and Authentik's in Phase 4, handled at the proxy layer (Caddy `rate_limit`) plus CrowdSec (below) rather than fail2ban log-parsing.
 
-**1c-4: Phase 4 security architecture (preview — implementation in Phase 4)**
+**1c-4: Security architecture preview (partially implemented in Phase 4; remainder deferred)**
 
 Committing these choices *here*, before any Phase 4 code gets written, so the shape of the system is decided:
 
 **Reverse proxy: Caddy.** Terminates TLS on 80/443, automatic ACME via Let's Encrypt. Reasons over nginx: automatic HTTPS with zero config, `forward_auth` directive for Authentik (one line per vhost), strong defaults (HSTS, HTTP/2, modern ciphers) out of the box, smaller config surface. Add HTTP security headers per vhost: `Strict-Transport-Security`, `Content-Security-Policy` (per app), `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`. Rate-limit login endpoints with `rate_limit` (5 req/min per IP is a reasonable start).
 
-**Auth: Authentik in front of admin UIs only.**
+**Auth: Authentik in front of admin UIs only (deferred).**
 
 - Foundry itself stays publicly accessible — players log in via Foundry's own auth.
-- Grafana, Uptime Kuma, any future admin UI: Caddy `forward_auth` → Authentik outpost. The login form is Authentik, not the app. Enable TOTP + WebAuthn on the admin flow.
-- Authentik runs in its own NixOS container (below), with its PostgreSQL + Redis bound to `127.0.0.1`.
+- Grafana, Uptime Kuma, any future admin UI: if we later expose them publicly, the intended pattern is Caddy `forward_auth` → Authentik outpost. Until then, keep them on localhost and reach them over SSH tunnels.
+- Authentik is not deployed today. If/when it lands, it should run in its own NixOS container (below), with its PostgreSQL + Redis bound to `127.0.0.1`.
 
 **Service isolation: NixOS containers + per-service systemd hardening.**
 
@@ -563,7 +564,7 @@ Goal: v12 runs on the new server with your old data.
    - **Option A (simpler)**: put the zip on the server manually, reference it by absolute path in your Nix config. Quick but not reproducible.
    - **Option B (cleaner)**: store the zip on your Hetzner Storage Box or S3, use `pkgs.fetchurl` with a hash, add the access credentials via sops. Fully reproducible.
    - Start with A, migrate to B later.
-6. Add Caddy with automatic ACME for `foundry.simonito.com` — see the "Phase 4 security architecture" preview in Phase 1c-4 for the full reasoning (auto-HTTPS, `forward_auth` for Authentik on admin UIs, rate limiting, security headers). Either as part of the foundry module or a separate `modules/features/caddy.nix`.
+6. Add Caddy with automatic ACME for `foundry.simonito.com` — see the "Phase 4 security architecture" preview in Phase 1c-4 for the full reasoning. For the deployed setup, this means TLS termination + security headers for Foundry itself; Authentik-style `forward_auth` for admin UIs is a later phase, not a dependency of the Foundry cutover.
 7. Restore the data on the server: `cd /var/lib/foundryvtt/v12/data && tar xzf /tmp/foundry-v12-data.tar.gz` (pre-create dir, set ownership)
 8. Review `options.json` in the restored data — might need to fix `dataPath` references
 9. Deploy via CI: commit, push, watch it build and activate
@@ -680,7 +681,7 @@ Community-consensus monitoring for a single NixOS server is **VictoriaMetrics + 
 | Grafana Alloy | `services.alloy` | Ships systemd journal → Loki via `loki.source.journal`; OTEL-ready for future app instrumentation |
 | Grafana | `services.grafana` | Dashboard; datasources provisioned declaratively |
 
-All services bind on localhost. Caddy reverse-proxies Grafana behind Authentik forward_auth (Phase 1c-4 security architecture) at e.g. `grafana.foundry.simonito.com`. Grafana and VictoriaMetrics both speak the Prometheus-compatible API, so standard community dashboards (e.g. Grafana dashboard ID 1860 for node metrics) work without changes.
+All services bind on localhost. Grafana is intentionally reached over an SSH tunnel (`ssh -L 3000:127.0.0.1:3000 foundry`) rather than a public vhost. Grafana and VictoriaMetrics both speak the Prometheus-compatible API, so standard community dashboards (e.g. Grafana dashboard ID 1860 for node metrics) work without changes.
 
 **Implementation steps**
 
@@ -690,7 +691,7 @@ All services bind on localhost. Caddy reverse-proxies Grafana behind Authentik f
 4. Enable Loki with tsdb storage at `/var/lib/loki`. Set retention (e.g. 30 days) via `compactor.retention_enabled = true` and `limits_config.retention_period = "30d"`.
 5. Enable Alloy with a River config that ships the systemd journal to Loki using `loki.source.journal`. Also wire up the VictoriaMetrics metrics endpoint (`prometheus.scrape` → `prometheus.remote_write`) so Alloy is the single scrape agent.
 6. Enable Grafana with provisioned datasources for VictoriaMetrics (`localhost:8428`, Prometheus-compatible) and Loki (`localhost:3100`). Pre-provision the node dashboard.
-7. Add Caddy vhost for Grafana behind Authentik forward_auth.
+7. Optional future step: add a Caddy vhost for Grafana behind Authentik `forward_auth` if SSH-tunnel-only access becomes too limiting.
 
 **Phase 5c: Monitoring data backup + crash analysis**
 
@@ -810,6 +811,26 @@ Both jobs use the same sops credentials and the same append-only Storage Box sub
    - the **free rescue-recovery runbook** — activate rescue in Robot → reset → SSH in with the Robot-registered key → `cryptsetup open /dev/disk/by-partlabel/cryptroot cryptroot` → `mdadm --assemble --scan` → mount → fix. This is the break-glass path from "What to watch for" written out as actual commands so you don't have to think at 2am;
    - a line reminding you to update the SSH key registered in Hetzner Robot whenever you rotate the laptop's key — rescue authorizes whatever is registered in Robot at activation time, not what's on the server;
    - the "optional upgrade path" steps from Phase 1 in case you ever flip the box to UEFI + PTT (this is the only scenario where paid KVM enters the picture).
+
+**Phase 5f: Admin auth + exposure model**
+
+Goal: add Authentik in a way that matches what each service actually supports, without exposing more surface area than necessary.
+
+1. Keep Foundry publicly reachable on `foundry.simonito.com` and rely on Foundry's own authentication for players/admins. Do **not** put Foundry behind Authentik.
+2. Add Authentik as the IdP for admin-facing services that support native OIDC/SAML. **Grafana is the first target**: it supports Generic OAuth / OIDC directly, and authentik has an official Grafana integration. Prefer native OIDC here over proxy auth so Grafana can map roles/groups itself.
+3. Accept the infrastructure consequence up front: authentik itself wants PostgreSQL and Redis. If Phase 5f lands before the broader "database for more stuff" work, then 5f should introduce the minimum Postgres/Redis needed for authentik and Phase 6 can later generalize that into shared database infrastructure.
+4. Keep Loki and VictoriaMetrics bound to `127.0.0.1` even after Grafana gets SSO. Grafana already talks to both through server-side datasource proxying, so they do not need their own public endpoints for normal use.
+5. For admin UIs that do **not** support native auth, use Caddy `forward_auth` with an authentik outpost. This is the right bucket for future one-off dashboards and small web UIs, not for Grafana.
+6. Treat VictoriaMetrics specially if you ever want to expose it directly: the OSS stack does not offer a simple browser-login OIDC flow, but `vmauth` can enforce Basic auth, Bearer tokens, or JWT validation in front of VictoriaMetrics. That is a separate path from Grafana SSO and only worth doing if raw VMUI/API access becomes necessary.
+7. Loki likewise has no built-in authentication layer; if it is ever exposed directly, put an authenticating reverse proxy in front of it rather than expecting Loki itself to handle login.
+8. End the phase by implementing CrowdSec in the most Nix-native, low-maintenance way:
+   - enable the local CrowdSec engine via the NixOS module;
+   - install the `crowdsecurity/sshd` and `crowdsecurity/caddy` hub collections so SSH and Caddy logs are parsed for decisions;
+   - make sure Caddy writes access logs to disk in the format the CrowdSec `caddy-logs` parser expects;
+   - enable the NixOS `crowdsec-firewall-bouncer` module against the local LAPI, using nftables mode and automatic bouncer registration.
+9. Verify the CrowdSec rollout before closing the phase: confirm SSH and Caddy events are visible to `cscli`, add a manual decision against a test IP, and confirm the firewall bouncer enforces it.
+10. Defer the Caddy-specific CrowdSec bouncer / AppSec path unless you later decide the extra complexity is worth it. It exists and is stable in the CrowdSec hub, but it typically means carrying a custom Caddy build/module; the firewall bouncer gets most of the practical value with much less Nix maintenance.
+11. Treat containerized service isolation as an optional hardening follow-up, not a prerequisite for the Authentik + CrowdSec rollout.
 
 **Phase 6: Database for the "more stuff"**
 
