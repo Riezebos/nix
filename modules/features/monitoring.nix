@@ -73,12 +73,20 @@
         };
 
         # Loki still initializes the memberlist-kv module even when every
-        # ring is configured as `inmemory`. Its default bind autodiscovery
-        # looks for `eth0`/`en0`/`lo` and hard-fails on foundry, which
-        # names its primary NIC `eno1` (predictable NIC names). Pin the
-        # bind address to localhost — single-node, nothing to gossip with.
+        # ring is configured as `inmemory`. Two separate autodiscovery
+        # paths fail on foundry (primary NIC is `eno1`, not `eth0`/`en0`):
+        #
+        # 1. `bind_addr` — what memberlist binds on. With only localhost
+        #    configured, memberlist binds on 127.0.0.1 cleanly.
+        # 2. `advertise_addr` — the address memberlist advertises to
+        #    peers. If unset, memberlist enumerates the bind interfaces
+        #    and picks the first non-loopback unicast address; loopback
+        #    alone is rejected as "no useable address found" and the
+        #    whole module init fails. Pin it to localhost too — there
+        #    are no peers to advertise to.
         memberlist = {
           bind_addr = [bindHost];
+          advertise_addr = bindHost;
         };
 
         schema_config.configs = [
