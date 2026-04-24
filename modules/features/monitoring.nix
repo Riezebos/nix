@@ -14,6 +14,7 @@
     nodeExporterPort = 9100;
     processExporterPort = 9256;
     grafanaPort = 3000;
+    grafanaDbPath = "/var/lib/grafana/data/grafana.db";
 
     prometheusDatasource = {
       type = "prometheus";
@@ -802,11 +803,23 @@
 
       // ---- Logs: Caddy access JSON -> Loki.
       local.file_match "caddy_access" {
-        path_targets = [{
-          __path__ = "/var/log/caddy/access-*.log",
-          job      = "caddy-access",
-          host     = "foundry",
-        }]
+        path_targets = [
+          {
+            __path__ = "/var/log/caddy/access-auth.log",
+            job      = "caddy-access",
+            host     = "foundry",
+          },
+          {
+            __path__ = "/var/log/caddy/access-foundry.log",
+            job      = "caddy-access",
+            host     = "foundry",
+          },
+          {
+            __path__ = "/var/log/caddy/access-grafana.log",
+            job      = "caddy-access",
+            host     = "foundry",
+          },
+        ]
         sync_period = "10s"
       }
 
@@ -825,6 +838,36 @@
     # Caddy writes access logs as 0640; the Alloy service needs the Caddy
     # group to tail those files into Loki.
     systemd.services.alloy.serviceConfig.SupplementaryGroups = ["caddy"];
+
+    # Grafana generated random datasource UIDs before we started pinning
+    # dashboards to stable datasource UIDs. Align the existing SQLite rows
+    # before Grafana starts so provisioning can update them instead of
+    # aborting with "data source not found".
+    systemd.services.grafana-datasource-uids = {
+      description = "Align Grafana datasource UIDs with provisioned dashboards";
+      before = ["grafana.service"];
+      requiredBy = ["grafana.service"];
+      serviceConfig = {
+        Type = "oneshot";
+        User = "root";
+        Group = "root";
+      };
+      script = ''
+        set -euo pipefail
+        if [ ! -f ${grafanaDbPath} ]; then
+          exit 0
+        fi
+        has_data_source_table="$(${pkgs.sqlite}/bin/sqlite3 ${grafanaDbPath} \
+          "select count(*) from sqlite_master where type = 'table' and name = 'data_source';")"
+        if [ "$has_data_source_table" != "1" ]; then
+          exit 0
+        fi
+        ${pkgs.sqlite}/bin/sqlite3 ${grafanaDbPath} '
+          update data_source set uid = "victoriametrics" where name = "VictoriaMetrics";
+          update data_source set uid = "loki" where name = "Loki";
+        '
+      '';
+    };
 
     # ---------------- Dashboard ----------------
     # Grafana still listens on localhost only; Caddy publishes it at
