@@ -21,8 +21,10 @@ alejandra .
 # Edit sops-encrypted secrets for the server
 sops modules/hosts/foundry/secrets.yaml
 
-# Deploy to server (run from laptop; NIX_SSHOPTS must point to deploy key)
-export NIX_SSHOPTS="-o IdentitiesOnly=yes -i $HOME/.config/foundry-bootstrap/deploy_ed25519"
+# Preferred server deploy path: push/merge to main and let GitHub Actions
+# build, check, and deploy via deploy-rs with magic rollback.
+#
+# Manual fallback from the laptop (SSH config handles host, port, and key):
 nix run nixpkgs#nixos-rebuild -- switch \
   --flake .#foundry \
   --target-host deploy@foundry \
@@ -63,8 +65,9 @@ foundry-unlock-seed     # one-time: stores passphrase in Keychain
 - **Disk layout**: mdraid RAID1 across two Samsung PM983 NVMes + LUKS2 on top + ext4. Separate mirrored `/boot` (unencrypted, GRUB-readable). Legacy BIOS, no TPM.
 - **LUKS unlock**: SSH into initrd on port 2222 (`ForceCommand systemd-tty-ask-password-agent --query`). The `foundry-unlock` zsh helper (in `modules/home/shared.nix`) automates this from the laptop.
 - **Secrets**: sops-nix, encrypted with age keys. The server decrypts using `/etc/ssh/ssh_host_ed25519_key` → age (via `ssh-to-age`). `modules/hosts/foundry/secrets.yaml` must be `git add`-ed before `nix eval` can read it (flakes filter through git's tree view).
+- **Deploys**: prefer GitHub Actions on `main`; it builds/checks the flake and deploys `foundry` through deploy-rs with rollback. Laptop `nixos-rebuild --target-host deploy@foundry` is the manual fallback for emergencies or CI outages.
 - **Unattended upgrades**: `system.autoUpgrade` pulls from `github:Riezebos/nix` nightly at 04:30 with `operation = "boot"` — stages the generation without activating, so services don't restart mid-session.
-- **Firewall**: explicit allow-list — ports 22, 2222 only. Port 80/443 will be added in Phase 4 (Caddy).
+- **Firewall**: explicit allow-list — 62222 for main-system SSH, 2222 for initrd unlock, and 80/443 via Caddy. Port 22 is deliberately closed on the running system.
 - **No public IP in this repo**: the real server IP lives in `~/.ssh/config` as `Host foundry`. The `foundry-unlock` helper resolves it at runtime via `ssh -G foundry`.
 
 ### Pre-commit hooks

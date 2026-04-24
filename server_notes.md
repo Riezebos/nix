@@ -27,7 +27,7 @@ Phase 1 of `PLAN.md`; meant to be merged into/superseded by `BOOTSTRAP.md`
   - `deploy` — SSH-key login (key lives at
     `~/.config/foundry-bootstrap/deploy_ed25519` on the laptop), in
     `wheel`, NOPASSWD `sudo`. This is the activation account for both
-    laptop-driven `nixos-rebuild --target-host` and (eventually) CI.
+    GitHub Actions deploy-rs and laptop-driven fallback deploys.
 
 ## Bootstrap artifacts on the laptop (outside the repo)
 
@@ -174,15 +174,24 @@ the disks are a brick — no hardware-assisted recovery path on this
 box (no TPM, no PTT, legacy BIOS). See "Future upgrade path" in
 `PLAN.md` Phase 1.
 
-## Deploying config changes from the laptop
+## Deploying config changes
 
-Until CI is in place (Phase 3), deploys are laptop-driven via the
-`deploy` user. `nixos-rebuild` isn't shipped for macOS, so run it via
-`nix run nixpkgs#nixos-rebuild`:
+Preferred path: commit/merge to `main` and let GitHub Actions deploy.
+The `.github/workflows/ci.yml` workflow builds the checks and foundry
+toplevel first, then deploys with deploy-rs. That gives us deploy-rs's
+health check and automatic rollback instead of a raw
+`nixos-rebuild switch`.
+
+Use the laptop path only as a manual fallback for emergencies, CI
+outages, or cases where you explicitly want to bypass the main-branch
+deployment flow. `nixos-rebuild` isn't shipped for macOS, so run it via
+`nix run nixpkgs#nixos-rebuild`. The laptop's `~/.ssh/config` is the
+authority for the `foundry` host, including the real hostname, port
+62222, user/key defaults, and any `IdentitiesOnly` setting, so no
+`NIX_SSHOPTS` override is needed:
 
 ```bash
 cd ~/repos/nix
-export NIX_SSHOPTS="-o IdentitiesOnly=yes -i $HOME/.config/foundry-bootstrap/deploy_ed25519"
 
 nix run nixpkgs#nixos-rebuild -- switch \
   --flake .#foundry \
@@ -192,9 +201,9 @@ nix run nixpkgs#nixos-rebuild -- switch \
   --sudo
 ```
 
-- `NIX_SSHOPTS` picks up the deploy private key for every SSH that
-  `nixos-rebuild` fires internally. There is no `-i` / `-s` CLI flag
-  for that; `NIX_SSHOPTS` is the canonical way.
+- `ssh deploy@foundry` should work before running a deploy. If it does,
+  `nixos-rebuild` will use the same SSH config for the internal remote
+  build/copy/activation steps.
 - `--build-host` is the same as `--target-host` because the laptop
   (aarch64-darwin) can't cross-build `x86_64-linux` and the target has
   plenty of CPU + ECC RAM.
@@ -207,9 +216,8 @@ nix run nixpkgs#nixos-rebuild -- switch \
 - `deploy` has NOPASSWD `sudo` scoped to `ALL` (tighten to
   `switch-to-configuration` only during Phase 3b when `deploy-rs`
   lands).
-- Magic-rollback / health-check is **not** wired up yet; a bad config
-  merged to main *will* break the running system. Don't deploy unreviewed
-  changes until `deploy-rs` is in place.
+- This manual path does **not** have deploy-rs magic rollback. Prefer CI
+  for normal deploys.
 
 Validated end-to-end on 2026-04-17 — running the above against the
 currently-active config was a clean no-op switch, confirming the

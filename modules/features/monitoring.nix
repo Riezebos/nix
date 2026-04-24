@@ -12,7 +12,585 @@
     vmPort = 8428;
     lokiPort = 3100;
     nodeExporterPort = 9100;
+    processExporterPort = 9256;
     grafanaPort = 3000;
+
+    prometheusDatasource = {
+      type = "prometheus";
+      uid = "victoriametrics";
+    };
+    lokiDatasource = {
+      type = "loki";
+      uid = "loki";
+    };
+
+    dashboardFile = name: dashboard:
+      pkgs.writeText "${name}.json" (builtins.toJSON dashboard);
+    dashboardDir = pkgs.linkFarm "grafana-dashboards" [
+      {
+        name = "foundry-system-overview.json";
+        path = dashboardFile "foundry-system-overview" systemOverviewDashboard;
+      }
+      {
+        name = "foundry-services-and-logs.json";
+        path = dashboardFile "foundry-services-and-logs" servicesAndLogsDashboard;
+      }
+      {
+        name = "foundry-edge-and-backups.json";
+        path = dashboardFile "foundry-edge-and-backups" edgeAndBackupsDashboard;
+      }
+    ];
+
+    commonDashboard = title: uid: panels: {
+      inherit panels title uid;
+      annotations.list = [
+        {
+          builtIn = 1;
+          datasource = {
+            type = "grafana";
+            uid = "-- Grafana --";
+          };
+          enable = true;
+          hide = true;
+          iconColor = "rgba(0, 211, 255, 1)";
+          name = "Annotations & Alerts";
+          type = "dashboard";
+        }
+      ];
+      editable = true;
+      fiscalYearStartMonth = 0;
+      graphTooltip = 1;
+      liveNow = false;
+      refresh = "30s";
+      schemaVersion = 39;
+      tags = ["foundry" "nixos"];
+      templating.list = [];
+      time = {
+        from = "now-6h";
+        to = "now";
+      };
+      timezone = "browser";
+      version = 1;
+      weekStart = "";
+    };
+
+    statPanel = id: title: gridPos: expr: unit: {
+      inherit gridPos id title;
+      datasource = prometheusDatasource;
+      fieldConfig.defaults = {
+        inherit unit;
+        color.mode = "thresholds";
+        thresholds = {
+          mode = "absolute";
+          steps = [
+            {
+              color = "green";
+              value = null;
+            }
+          ];
+        };
+      };
+      fieldConfig.overrides = [];
+      options = {
+        colorMode = "value";
+        graphMode = "area";
+        justifyMode = "auto";
+        orientation = "auto";
+        reduceOptions = {
+          calcs = ["lastNotNull"];
+          fields = "";
+          values = false;
+        };
+        textMode = "auto";
+        wideLayout = true;
+      };
+      targets = [
+        {
+          inherit expr;
+          instant = true;
+          refId = "A";
+        }
+      ];
+      type = "stat";
+    };
+
+    timeseriesPanelWithDatasource = datasource: id: title: gridPos: targets: unit: {
+      inherit datasource gridPos id targets title;
+      fieldConfig.defaults = {
+        inherit unit;
+        color.mode = "palette-classic";
+        custom = {
+          axisCenteredZero = false;
+          axisColorMode = "text";
+          axisLabel = "";
+          axisPlacement = "auto";
+          barAlignment = 0;
+          drawStyle = "line";
+          fillOpacity = 12;
+          gradientMode = "none";
+          hideFrom = {
+            legend = false;
+            tooltip = false;
+            viz = false;
+          };
+          insertNulls = false;
+          lineInterpolation = "linear";
+          lineWidth = 1;
+          pointSize = 4;
+          scaleDistribution.type = "linear";
+          showPoints = "never";
+          spanNulls = false;
+          stacking.mode = "none";
+          thresholdsStyle.mode = "off";
+        };
+        thresholds = {
+          mode = "absolute";
+          steps = [
+            {
+              color = "green";
+              value = null;
+            }
+          ];
+        };
+      };
+      fieldConfig.overrides = [];
+      options = {
+        legend = {
+          calcs = ["lastNotNull"];
+          displayMode = "list";
+          placement = "bottom";
+          showLegend = true;
+        };
+        tooltip = {
+          mode = "multi";
+          sort = "none";
+        };
+      };
+      type = "timeseries";
+    };
+    timeseriesPanel = timeseriesPanelWithDatasource prometheusDatasource;
+    lokiTimeseriesPanel = timeseriesPanelWithDatasource lokiDatasource;
+
+    logsPanel = id: title: gridPos: expr: {
+      inherit gridPos id title;
+      datasource = lokiDatasource;
+      options = {
+        dedupStrategy = "none";
+        enableLogDetails = true;
+        prettifyLogMessage = false;
+        showCommonLabels = false;
+        showLabels = false;
+        showTime = true;
+        sortOrder = "Descending";
+        wrapLogMessage = true;
+      };
+      targets = [
+        {
+          inherit expr;
+          queryType = "range";
+          refId = "A";
+        }
+      ];
+      type = "logs";
+    };
+
+    serviceProcesses = [
+      {
+        name = "foundryvtt";
+        cmdline = [".*(FoundryVTT|foundryvtt|resources/app/main\\.js).*"];
+      }
+      {
+        name = "caddy";
+        cmdline = [".*/caddy( |$).*"];
+      }
+      {
+        name = "grafana";
+        cmdline = [".*(grafana|grafana-server).*"];
+      }
+      {
+        name = "authentik-server";
+        cmdline = [".*(/ak|authentik).*server.*"];
+      }
+      {
+        name = "authentik-worker";
+        cmdline = [".*(/ak|authentik).*worker.*"];
+      }
+      {
+        name = "loki";
+        cmdline = [".*/loki( |$).*"];
+      }
+      {
+        name = "victoriametrics";
+        cmdline = [".*(victoria-metrics|victoriametrics).*"];
+      }
+      {
+        name = "alloy";
+        cmdline = [".*/alloy( |$).*"];
+      }
+      {
+        name = "postgresql";
+        cmdline = [".*(postgres|postgresql).*"];
+      }
+      {
+        name = "redis-authentik";
+        cmdline = [".*redis-server.*16379.*"];
+      }
+      {
+        name = "node-exporter";
+        cmdline = [".*node_exporter.*"];
+      }
+      {
+        name = "process-exporter";
+        cmdline = [".*process-exporter.*"];
+      }
+    ];
+    serviceUnits = "foundryvtt.service|caddy.service|grafana.service|authentik-server.service|authentik-worker.service|loki.service|victoriametrics.service|alloy.service|postgresql.service|redis-authentik.service";
+    serviceProcessRegex = lib.concatStringsSep "|" (map (service: service.name) serviceProcesses);
+    backupTimers = "restic-backups-foundry.timer|restic-backups-foundry-journal.timer|restic-backups-foundry-postgresql.timer|restic-check-foundry.timer";
+
+    systemOverviewDashboard = commonDashboard "Foundry / System Overview" "foundry-system-overview" [
+      (statPanel 1 "Node exporter" {
+          h = 4;
+          w = 6;
+          x = 0;
+          y = 0;
+        }
+        "up{instance=\"foundry\"}"
+        "none")
+      (statPanel 2 "CPU busy" {
+          h = 4;
+          w = 6;
+          x = 6;
+          y = 0;
+        }
+        "100 * (1 - avg(rate(node_cpu_seconds_total{instance=\"foundry\",mode=\"idle\"}[$__rate_interval])))"
+        "percent")
+      (statPanel 3 "Memory used" {
+          h = 4;
+          w = 6;
+          x = 12;
+          y = 0;
+        }
+        "100 * (1 - node_memory_MemAvailable_bytes{instance=\"foundry\"} / node_memory_MemTotal_bytes{instance=\"foundry\"})"
+        "percent")
+      (statPanel 4 "Root filesystem used" {
+          h = 4;
+          w = 6;
+          x = 18;
+          y = 0;
+        }
+        "100 * (1 - node_filesystem_avail_bytes{instance=\"foundry\",mountpoint=\"/\",fstype!~\"tmpfs|ramfs|overlay\"} / node_filesystem_size_bytes{instance=\"foundry\",mountpoint=\"/\",fstype!~\"tmpfs|ramfs|overlay\"})"
+        "percent")
+      (timeseriesPanel 5 "CPU busy" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 4;
+        } [
+          {
+            expr = "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{instance=\"foundry\",mode=\"idle\"}[$__rate_interval])))";
+            legendFormat = "busy";
+            refId = "A";
+          }
+        ]
+        "percent")
+      (timeseriesPanel 6 "Memory" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 4;
+        } [
+          {
+            expr = "node_memory_MemTotal_bytes{instance=\"foundry\"} - node_memory_MemAvailable_bytes{instance=\"foundry\"}";
+            legendFormat = "used";
+            refId = "A";
+          }
+          {
+            expr = "node_memory_MemAvailable_bytes{instance=\"foundry\"}";
+            legendFormat = "available";
+            refId = "B";
+          }
+        ]
+        "bytes")
+      (timeseriesPanel 7 "Filesystem free" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 12;
+        } [
+          {
+            expr = "node_filesystem_avail_bytes{instance=\"foundry\",fstype!~\"tmpfs|ramfs|overlay\",mountpoint=~\"/|/boot.*\"}";
+            legendFormat = "{{mountpoint}}";
+            refId = "A";
+          }
+        ]
+        "bytes")
+      (timeseriesPanel 8 "Network throughput" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 12;
+        } [
+          {
+            expr = "sum by (device) (rate(node_network_receive_bytes_total{instance=\"foundry\",device!~\"lo|veth.*|docker.*\"}[$__rate_interval]))";
+            legendFormat = "{{device}} rx";
+            refId = "A";
+          }
+          {
+            expr = "-sum by (device) (rate(node_network_transmit_bytes_total{instance=\"foundry\",device!~\"lo|veth.*|docker.*\"}[$__rate_interval]))";
+            legendFormat = "{{device}} tx";
+            refId = "B";
+          }
+        ]
+        "Bps")
+    ];
+
+    servicesAndLogsDashboard = commonDashboard "Foundry / Services & Logs" "foundry-services-and-logs" [
+      (statPanel 1 "Active core services" {
+          h = 4;
+          w = 8;
+          x = 0;
+          y = 0;
+        }
+        "sum(node_systemd_unit_state{instance=\"foundry\",name=~\"${serviceUnits}\",state=\"active\"})"
+        "none")
+      (statPanel 2 "Failed units" {
+          h = 4;
+          w = 8;
+          x = 8;
+          y = 0;
+        }
+        "sum(node_systemd_unit_state{instance=\"foundry\",state=\"failed\"})"
+        "none")
+      (statPanel 3 "Running processes" {
+          h = 4;
+          w = 8;
+          x = 16;
+          y = 0;
+        }
+        "node_procs_running{instance=\"foundry\"}"
+        "none")
+      (timeseriesPanel 4 "Service active state" {
+          h = 9;
+          w = 24;
+          x = 0;
+          y = 4;
+        } [
+          {
+            expr = "node_systemd_unit_state{instance=\"foundry\",name=~\"${serviceUnits}\",state=\"active\"}";
+            legendFormat = "{{name}}";
+            refId = "A";
+          }
+        ]
+        "none")
+      (lokiTimeseriesPanel 5 "Journal volume" {
+          h = 7;
+          w = 12;
+          x = 0;
+          y = 37;
+        } [
+          {
+            datasource = lokiDatasource;
+            expr = "sum(count_over_time({host=\"foundry\", job=\"systemd-journal\"}[$__interval]))";
+            legendFormat = "journal lines";
+            refId = "A";
+          }
+        ]
+        "logs")
+      (lokiTimeseriesPanel 6 "Error-ish journal lines" {
+          h = 7;
+          w = 12;
+          x = 12;
+          y = 37;
+        } [
+          {
+            datasource = lokiDatasource;
+            expr = "sum(count_over_time({host=\"foundry\", job=\"systemd-journal\"} |~ \"(?i)(error|failed|panic|traceback|exception)\" [$__interval]))";
+            legendFormat = "matches";
+            refId = "A";
+          }
+        ]
+        "logs")
+      (logsPanel 7 "Recent service errors" {
+          h = 10;
+          w = 12;
+          x = 0;
+          y = 44;
+        }
+        "{host=\"foundry\", job=\"systemd-journal\"} |~ \"(?i)(error|failed|panic|traceback|exception)\"")
+      (logsPanel 8 "Authentik and Grafana" {
+          h = 10;
+          w = 12;
+          x = 12;
+          y = 44;
+        }
+        "{host=\"foundry\", job=\"systemd-journal\"} |~ \"authentik|grafana\"")
+      (timeseriesPanel 9 "Service CPU" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 13;
+        } [
+          {
+            expr = "rate(namedprocess_namegroup_cpu_seconds_total{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\"}[$__rate_interval])";
+            legendFormat = "{{groupname}}";
+            refId = "A";
+          }
+        ]
+        "cores")
+      (timeseriesPanel 10 "Service memory RSS" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 13;
+        } [
+          {
+            expr = "namedprocess_namegroup_memory_bytes{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\",memtype=\"resident\"}";
+            legendFormat = "{{groupname}}";
+            refId = "A";
+          }
+        ]
+        "bytes")
+      (timeseriesPanel 11 "Service processes" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 21;
+        } [
+          {
+            expr = "namedprocess_namegroup_num_procs{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\"}";
+            legendFormat = "{{groupname}}";
+            refId = "A";
+          }
+        ]
+        "none")
+      (timeseriesPanel 12 "Service threads" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 21;
+        } [
+          {
+            expr = "sum by (groupname) (namedprocess_namegroup_thread_count{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\"})";
+            legendFormat = "{{groupname}}";
+            refId = "A";
+          }
+        ]
+        "none")
+      (timeseriesPanel 13 "Service disk I/O" {
+          h = 8;
+          w = 24;
+          x = 0;
+          y = 29;
+        } [
+          {
+            expr = "rate(namedprocess_namegroup_read_bytes_total{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\"}[$__rate_interval])";
+            legendFormat = "{{groupname}} read";
+            refId = "A";
+          }
+          {
+            expr = "-rate(namedprocess_namegroup_write_bytes_total{instance=\"foundry\",groupname=~\"${serviceProcessRegex}\"}[$__rate_interval])";
+            legendFormat = "{{groupname}} write";
+            refId = "B";
+          }
+        ]
+        "Bps")
+    ];
+
+    edgeAndBackupsDashboard = commonDashboard "Foundry / Edge & Backups" "foundry-edge-and-backups" [
+      (lokiTimeseriesPanel 1 "Caddy requests by host" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 0;
+        } [
+          {
+            datasource = lokiDatasource;
+            expr = "sum by (request_host) (count_over_time({host=\"foundry\", job=\"caddy-access\"} | json [$__interval]))";
+            legendFormat = "{{request_host}}";
+            refId = "A";
+          }
+        ]
+        "reqps")
+      (lokiTimeseriesPanel 2 "Caddy 5xx responses" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 0;
+        } [
+          {
+            datasource = lokiDatasource;
+            expr = "sum(count_over_time({host=\"foundry\", job=\"caddy-access\"} |~ \"\\\"status\\\":5[0-9][0-9]\" [$__interval]))";
+            legendFormat = "5xx";
+            refId = "A";
+          }
+        ]
+        "reqps")
+      (statPanel 3 "Backup timers seen" {
+          h = 4;
+          w = 8;
+          x = 0;
+          y = 8;
+        }
+        "count(node_systemd_unit_state{instance=\"foundry\",name=~\"${backupTimers}\"})"
+        "none")
+      (statPanel 4 "Oldest backup timer age" {
+          h = 4;
+          w = 8;
+          x = 8;
+          y = 8;
+        }
+        "max(time() - node_systemd_timer_last_trigger_seconds{instance=\"foundry\",name=~\"${backupTimers}\"})"
+        "s")
+      (statPanel 5 "MD RAID inactive disks" {
+          h = 4;
+          w = 8;
+          x = 16;
+          y = 8;
+        }
+        "sum(node_md_disks{instance=\"foundry\",state!=\"active\"})"
+        "none")
+      (timeseriesPanel 6 "Backup timer age" {
+          h = 8;
+          w = 12;
+          x = 0;
+          y = 12;
+        } [
+          {
+            expr = "time() - node_systemd_timer_last_trigger_seconds{instance=\"foundry\",name=~\"${backupTimers}\"}";
+            legendFormat = "{{name}}";
+            refId = "A";
+          }
+        ]
+        "s")
+      (timeseriesPanel 7 "RAID disks" {
+          h = 8;
+          w = 12;
+          x = 12;
+          y = 12;
+        } [
+          {
+            expr = "node_md_disks{instance=\"foundry\"}";
+            legendFormat = "{{device}} {{state}}";
+            refId = "A";
+          }
+        ]
+        "none")
+      (logsPanel 8 "Recent Caddy access logs" {
+          h = 10;
+          w = 12;
+          x = 0;
+          y = 20;
+        }
+        "{host=\"foundry\", job=\"caddy-access\"} | json")
+      (logsPanel 9 "Backup and healthcheck logs" {
+          h = 10;
+          w = 12;
+          x = 12;
+          y = 20;
+        }
+        "{host=\"foundry\", job=\"systemd-journal\"} |~ \"restic|postgresqlBackup|healthchecks-ping\"")
+    ];
   in {
     # ---------------- Metrics store ----------------
     # VictoriaMetrics speaks the Prometheus remote_write + query APIs, so
@@ -39,6 +617,24 @@
       listenAddress = bindHost;
       port = nodeExporterPort;
       enabledCollectors = ["systemd" "mdadm" "processes"];
+    };
+
+    # Per-service resource accounting. Node exporter gives host-wide CPU,
+    # memory, disk, network, and systemd state; process-exporter adds grouped
+    # CPU/RSS/process/thread metrics for the services we actually care about.
+    services.prometheus.exporters.process = {
+      enable = true;
+      listenAddress = bindHost;
+      port = processExporterPort;
+      # Root is needed for accurate cross-user /proc/<pid>/io reads; the
+      # exporter stays loopback-only and inherits the module's hardening.
+      user = "root";
+      group = "root";
+      settings.process_names =
+        map (service: {
+          inherit (service) cmdline name;
+        })
+        serviceProcesses;
     };
 
     # ---------------- Log store ----------------
@@ -172,6 +768,17 @@
         scrape_interval = "15s"
       }
 
+      // ---- Metrics: scrape process_exporter for per-service resources.
+      prometheus.scrape "process" {
+        targets = [{
+          __address__ = "${bindHost}:${toString processExporterPort}",
+          instance    = "foundry",
+          job         = "process-exporter",
+        }]
+        forward_to      = [prometheus.remote_write.vm.receiver]
+        scrape_interval = "15s"
+      }
+
       prometheus.remote_write "vm" {
         endpoint {
           url = "http://${bindHost}:${toString vmPort}/api/v1/write"
@@ -193,12 +800,31 @@
         // automatically via the relabel defaults in loki.source.journal.
       }
 
+      // ---- Logs: Caddy access JSON -> Loki.
+      local.file_match "caddy_access" {
+        path_targets = [{
+          __path__ = "/var/log/caddy/access-*.log",
+          job      = "caddy-access",
+          host     = "foundry",
+        }]
+        sync_period = "10s"
+      }
+
+      loki.source.file "caddy_access" {
+        targets    = local.file_match.caddy_access.targets
+        forward_to = [loki.write.local.receiver]
+      }
+
       loki.write "local" {
         endpoint {
           url = "http://${bindHost}:${toString lokiPort}/loki/api/v1/push"
         }
       }
     '';
+
+    # Caddy writes access logs as 0640; the Alloy service needs the Caddy
+    # group to tail those files into Loki.
+    systemd.services.alloy.serviceConfig.SupplementaryGroups = ["caddy"];
 
     # ---------------- Dashboard ----------------
     # Grafana still listens on localhost only; Caddy publishes it at
@@ -220,6 +846,7 @@
         datasources.settings.datasources = [
           {
             name = "VictoriaMetrics";
+            uid = "victoriametrics";
             type = "prometheus";
             access = "proxy";
             url = "http://${bindHost}:${toString vmPort}";
@@ -227,9 +854,22 @@
           }
           {
             name = "Loki";
+            uid = "loki";
             type = "loki";
             access = "proxy";
             url = "http://${bindHost}:${toString lokiPort}";
+          }
+        ];
+
+        dashboards.settings.providers = [
+          {
+            name = "foundry";
+            orgId = 1;
+            folder = "Foundry";
+            type = "file";
+            disableDeletion = true;
+            allowUiUpdates = true;
+            options.path = dashboardDir;
           }
         ];
       };
