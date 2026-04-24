@@ -61,8 +61,18 @@
       repository = "rclone:storagebox:${repoName}";
       passwordFile = config.sops.secrets."restic/password".path;
 
-      # FoundryVTT world state + the entire VictoriaMetrics data tree +
+      # FoundryVTT world state (from a rsync'd staging dir — see
+      # backupPrepareCommand) + the entire VictoriaMetrics data tree +
       # live Loki tsdb data.
+      #
+      # Foundry note: we no longer stop the service for the backup. The
+      # prepare step SIGSTOPs the whole foundryvtt cgroup for the few
+      # seconds it takes to rsync the dataset into
+      # `/var/lib/foundryvtt-staging`, then SIGCONTs. Players on an active
+      # world see at worst a brief latency blip; the daemon stays up, so
+      # the world stays launched (no more "admin screen on reconnect").
+      # Staging path is what lands in the snapshot — on restore, copy
+      # `/var/lib/foundryvtt-staging/*` back to `/var/lib/foundryvtt/`.
       #
       # VictoriaMetrics note (corrected 2026-04-23 after a restore drill):
       # VM's `/snapshot/create` does NOT build a self-contained hardlinked
@@ -81,7 +91,7 @@
       # unflushed log data are covered by the separate 15-minute journal
       # job below.
       paths = [
-        "/var/lib/foundryvtt"
+        "/var/lib/foundryvtt-staging"
         "/var/lib/victoriametrics"
         "/var/lib/loki"
       ];
@@ -91,9 +101,17 @@
       # short-circuit on an existing repo.
       initialize = true;
 
-      # Foundry persists world state as live JSON/ndjson. Stopping the
-      # service for the duration of the backup is the simplest way to get
-      # a point-in-time snapshot; expect ~3–5s of daily downtime at 04:00.
+      # Foundry persists world state as live JSON/ndjson. We SIGSTOP the
+      # whole foundryvtt cgroup (parent + any worker children) for the
+      # duration of a local rsync into a staging dir, then SIGCONT. The
+      # process never exits, so the launched world stays launched —
+      # players don't land on the admin/setup screen on reconnect.
+      # Expect a sub-second pause on a small dataset; the foundryvtt
+      # service has no WatchdogSec and `Restart=always` only triggers on
+      # exit, so SIGSTOP is safe here. `--kill-whom=all` hits every PID
+      # in the unit's cgroup atomically. The `trap` ensures we always
+      # SIGCONT even if rsync fails partway through.
+      #
       # VictoriaMetrics stays up: its `/snapshot/create` endpoint hard-links
       # the storage dir into a new subdirectory under snapshots/, which is
       # what restic then reads. The snapshot name is recorded in /run so
@@ -105,10 +123,17 @@
           http://127.0.0.1:8428/snapshot/create \
           | ${pkgs.jq}/bin/jq -r '.snapshot')
         printf '%s\n' "$snapshot" > /run/vm-snapshot-name
-        ${pkgs.systemd}/bin/systemctl stop foundryvtt.service
+
+        mkdir -p /var/lib/foundryvtt-staging
+        trap '${pkgs.systemd}/bin/systemctl kill --kill-whom=all -s CONT foundryvtt.service || true' EXIT
+        ${pkgs.systemd}/bin/systemctl kill --kill-whom=all -s STOP foundryvtt.service
+        ${pkgs.rsync}/bin/rsync -aH --delete \
+          /var/lib/foundryvtt/ \
+          /var/lib/foundryvtt-staging/
+        ${pkgs.systemd}/bin/systemctl kill --kill-whom=all -s CONT foundryvtt.service
+        trap - EXIT
       '';
       backupCleanupCommand = ''
-        ${pkgs.systemd}/bin/systemctl start foundryvtt.service
         snapshot=$(cat /run/vm-snapshot-name 2>/dev/null || true)
         if [ -n "$snapshot" ]; then
           ${pkgs.curl}/bin/curl -sf \
