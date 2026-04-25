@@ -12,22 +12,35 @@
       enable = true;
 
       # Pin the build that matches the zip we've seeded into /nix/store.
-      # `foundryvtt_12` alone auto-resolves to the latest v12 stable entry
+      # `foundryvtt_14` alone auto-resolves to the latest v14 stable entry
       # in reckenrode's versions.json, so a flake.lock bump could silently
-      # advance us to 12.344 and fail activation if we haven't downloaded
+      # advance us past 14.359 and fail activation if we haven't downloaded
       # the new zip. Bump this and the seeded zip together, on purpose.
-      package = inputs.foundryvtt.packages.${pkgs.stdenv.hostPlatform.system}.foundryvtt_12.overrideAttrs (_: {
-        build = "343";
-      });
+      package =
+        (pkgs.callPackage "${inputs.foundryvtt}/pkgs/foundryvtt" {
+          buildPackages =
+            pkgs.buildPackages
+            // {
+              buildNpmPackage = pkgs.buildPackages.buildNpmPackage.override {
+                nodejs = pkgs.nodejs_24;
+              };
+            };
+        }).overrideAttrs (_: {
+          majorVersion = "14";
+          releaseType = "stable";
+          build = "359";
+        });
 
       hostName = "foundry.simonito.com";
 
       # Foundry binds on 0.0.0.0 unconditionally; the host firewall only
       # exposes 80/443 (Caddy) and 62222/2222 (SSH), so 30012 is reachable
-      # only via the reverse proxy. Use 30012 to leave room for parallel
-      # versions later (v13 -> 30013).
+      # only via the reverse proxy. Keep the public service on the existing
+      # internal port so the Caddy vhost does not need to move.
       port = 30012;
-      dataDir = "/var/lib/foundryvtt/v12";
+      # Start v14 with fresh application data and leave the old v12 tree in
+      # place for rollback/reference instead of migrating buggy module state.
+      dataDir = "/var/lib/foundryvtt/v14";
 
       # Tell Foundry the public scheme/port so invite links and A/V ICE
       # candidates resolve against https://foundry.simonito.com:443
