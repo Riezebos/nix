@@ -40,20 +40,22 @@ jobs:
       # `nix flake check` is unusable here: on x86_64-linux it insists on
       # evaluating `homeConfigurations.simon-darwin` / `simon-m4`, whose
       # nixpkgs-devenv IFD patch derivation is pinned to aarch64-darwin
-      # and cannot be built on a Linux runner. Enumerate the x86_64-linux
-      # checks explicitly instead — this covers the same gates
-      # (pre-commit hooks, deploy-rs schema + activator) without the
-      # cross-system eval trap.
+      # and cannot be built on a Linux runner.
+      #
+      # FoundryVTT's installer zip is also not available to GitHub Actions
+      # because it is a personal-license file. Do not build deploy-activate
+      # here: it builds the system closure and would require the zip. The
+      # deploy job uses deploy-rs remoteBuild so the real closure builds on
+      # foundry, where the zip is seeded into the Nix store.
       - name: Build checks
         run: |
           nix build --print-build-logs \
             .#checks.x86_64-linux.pre-commit \
-            .#checks.x86_64-linux.deploy-activate \
             .#checks.x86_64-linux.deploy-schema
 
-      # Full system closure. Catches most eval errors and any build-time
-      # failures in the foundry module graph. This is what deploy-rs
-      # will activate; if it builds, activation is very likely to work.
+      # Instantiate the system closure. This catches eval errors in the
+      # foundry module graph without trying to build the proprietary Foundry
+      # package on the GitHub runner.
       #
       # We intentionally do NOT also build `…system.build.vm` here. The VM
       # variant evaluates `virtualisation.vmVariant` which assert-fails
@@ -65,11 +67,12 @@ jobs:
       # Working around this would require a stack of vmVariant overrides
       # (disable initrd-SSH, replace LUKS/mdraid with a plain disk…)
       # that drift from the real config and stop catching useful bugs.
-      # `build.toplevel` + deploy-rs magic-rollback is the real gate.
-      - name: Build foundry toplevel
+      # Instantiation here + remoteBuild + deploy-rs magic-rollback is the
+      # real gate.
+      - name: Instantiate foundry toplevel
         run: |
-          nix build --print-build-logs \
-            .#nixosConfigurations.foundry.config.system.build.toplevel
+          nix eval --raw \
+            .#nixosConfigurations.foundry.config.system.build.toplevel.drvPath
 
   deploy:
     needs: build

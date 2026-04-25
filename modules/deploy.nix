@@ -38,6 +38,11 @@ in {
       # ~/.ssh/config (see docs/foundry/operations.md).
       hostname = "foundry";
 
+      # FoundryVTT's installer zip is a personal-license file and is seeded
+      # into the target host's Nix store, not GitHub Actions. Build the system
+      # profile on foundry so deploys can use that local requireFile input.
+      remoteBuild = true;
+
       profiles.system = {
         path = deployPkgs.activate.nixos self.nixosConfigurations.foundry;
       };
