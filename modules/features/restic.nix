@@ -7,7 +7,7 @@
   }: let
     # Hetzner Storage Box subaccount used by foundry (append-only credential).
     # Pairs with the `foundry-admin` subaccount used from the laptop for
-    # prune/restore — see server_plan.md Phase 5. The username is not a
+    # prune/restore; see docs/foundry/backups.md. The username is not a
     # secret; the SSH key (sops) and restic password (sops) are what gate
     # access.
     storageboxHost = "u580408-sub1.your-storagebox.de";
@@ -147,8 +147,7 @@
 
       # No pruneOpts: foundry holds the append-only credential, so `forget
       # --prune` would be rejected. Retention is enforced from the laptop
-      # (separate, full-access credential) — see server_plan.md Phase 5
-      # "Pruning from the laptop".
+      # with the separate full-access credential; see docs/foundry/backups.md.
       #
       # No checkOpts: a monthly bit-rot scan runs in its own unit below so
       # heavy read-sampling doesn't bloat daily runtime, and a check failure
@@ -167,9 +166,9 @@
     # journal segments get uploaded. Cadence is every 15 min, which caps
     # the "what happened right before the crash?" gap at 15 minutes. Uses
     # the same append-only credential + password as the main job. A
-    # separate repo (`foundry-journal`) keeps the restore path trivial
-    # (`restic restore latest` doesn't need a path filter) and isolates
-    # journal retention from the main repo's retention policy.
+    # The URL path (`foundry-journal`) is only a selector label here: the
+    # Storage Box forced command chroots both credentials into the same
+    # underlying repo, so restores still use `--path /var/log/journal`.
     services.restic.backups.foundry-journal = {
       repository = "rclone:storagebox:foundry-journal";
       passwordFile = config.sops.secrets."restic/password".path;
@@ -209,7 +208,7 @@
     # pack files and verifies every pack header + snapshot tree. Over ~20
     # months the whole repo is read at least once. Separate unit so its
     # journal lives on its own and an OnFailure= hook can be attached
-    # distinctly from the backup unit (Phase 5 step 6).
+    # distinctly from the backup unit.
     systemd.services.restic-check-foundry = {
       description = "Restic repository integrity check (5% read-sample)";
       wants = ["network-online.target"];

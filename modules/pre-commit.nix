@@ -40,7 +40,7 @@
     # git-hooks.nix's shellHook installs/refreshes .git/hooks/pre-commit
     # the first time it runs. `nix flake check` also runs these hooks
     # against the tree (the flakeModule wires it up as checks.pre-commit
-    # automatically), which is the same gate CI will use in Phase 3a.
+    # automatically), which is the same gate CI uses.
     devShells.default = config.pre-commit.devShell;
   };
 }

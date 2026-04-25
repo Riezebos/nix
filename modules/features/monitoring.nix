@@ -5,8 +5,8 @@
     lib,
     ...
   }: let
-    # Loki and VictoriaMetrics stay loopback-only even after Phase 5f; Grafana
-    # is the public, authenticated front door and proxies both datasources
+    # Loki and VictoriaMetrics stay loopback-only; Grafana is the public,
+    # authenticated front door and proxies both datasources
     # server-side. This keeps the raw stores off the internet entirely.
     bindHost = "127.0.0.1";
     vmPort = 8428;
@@ -641,7 +641,7 @@
     # ---------------- Log store ----------------
     # Single-node Loki with the tsdb schema (the boltdb-shipper schema is
     # deprecated upstream). Storage is plain filesystem under /var/lib/loki
-    # — covered by the daily restic snapshot via Phase 5c.
+    # — covered by the daily restic snapshot.
     services.loki = {
       enable = true;
       configuration = {
@@ -726,7 +726,7 @@
 
         # Retention is enforced by the compactor, which also handles
         # delete_requests. Retention is a flat 30d — crash forensics are
-        # served by the 15-min journal restic job (Phase 5c), not by a
+        # served by the 15-min journal restic job, not by a
         # longer Loki window.
         compactor = {
           working_directory = "/var/lib/loki/compactor";

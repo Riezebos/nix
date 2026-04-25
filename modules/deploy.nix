@@ -9,8 +9,8 @@
   # Everything we deploy is x86_64-linux, so pin to that here.
   deployPkgs = inputs.deploy-rs.lib.x86_64-linux;
 in {
-  # Phase 3b of server_plan.md. deploy-rs does the one thing `nixos-rebuild
-  # --target-host switch` does not: "magic rollback" — it activates the new
+  # deploy-rs does the one thing `nixos-rebuild --target-host switch` does
+  # not: "magic rollback" — it activates the new
   # generation, health-checks it, and if the box doesn't respond within a
   # timeout it auto-reverts to the previous generation. Critical when
   # pushing to a remote box with live sessions on it.
@@ -35,7 +35,7 @@ in {
       # deploy workflow overrides it at runtime with
       #   `deploy --hostname ${{ secrets.FOUNDRY_HOST }} .#foundry`
       # and local invocations from the laptop resolve `foundry` via
-      # ~/.ssh/config (see Phase 0a).
+      # ~/.ssh/config (see docs/foundry/operations.md).
       hostname = "foundry";
 
       profiles.system = {

@@ -1,5 +1,5 @@
 {...}: {
-  # Placeholder hardware module. During Phase 1 (nixos-anywhere), regenerate the
+  # Placeholder hardware module. During a nixos-anywhere reinstall, regenerate the
   # real hardware configuration at ../../../hosts/foundry/hardware-configuration.nix via:
   #
   #   nix run github:nix-community/nixos-anywhere -- \

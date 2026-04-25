@@ -1,7 +1,7 @@
 {...}: {
   flake.nixosModules.crowdsec = {lib, ...}: {
-    # Phase 5f calls for the firewall bouncer in nftables mode. Flip the
-    # host firewall backend once here so the allow-list remains declarative.
+    # The firewall bouncer uses nftables mode. Flip the host firewall backend
+    # once here so the allow-list remains declarative.
     networking.nftables.enable = true;
 
     services.crowdsec = {

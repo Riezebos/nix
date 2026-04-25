@@ -34,7 +34,7 @@
     };
 
     # Legacy BIOS GRUB with mirrored /boot on both NVMes. No TPM, no UEFI
-    # available on this box — see PLAN.md "Hardware inventory".
+    # available on this box; see docs/foundry/overview.md.
     boot.loader.grub = {
       enable = true;
       efiSupport = false;
@@ -68,11 +68,11 @@
     '';
 
     # SSH-in-initrd for LUKS unlock. This is the primary unlock mechanism
-    # since the box has no TPM (see Phase 1 of PLAN.md).
+    # since the box has no TPM; see docs/foundry/operations.md.
     #
     # The ed25519 host key must live at /etc/secrets/initrd/ssh_host_ed25519_key
     # on the installed system. Generate it locally once and ship it with
-    # nixos-anywhere --extra-files during Phase 1.
+    # nixos-anywhere --extra-files during install.
     boot.initrd.network.enable = true;
     boot.initrd.network.ssh = {
       enable = true;
@@ -92,14 +92,14 @@
     # if the detected driver differs.
     boot.initrd.availableKernelModules = ["e1000e"];
 
-    # Phase 1c: public-but-hardened SSH. Key-only auth, root login off,
+    # Public-but-hardened SSH. Key-only auth, root login off,
     # small AllowUsers list, MaxAuthTries=3 for brute-force noise. We
     # evaluated a Netbird mesh cutover (close public :22, SSH via mesh
     # only) and chose against it for this box: the security gain over
     # key-only SSH is marginal, while the mesh adds a third-party
     # coordinator dependency and an interactive enrollment step to every
     # fresh reinstall — both at odds with the "redeploy quickly if this
-    # box crashes" goal. Admin-only internal services (Phase 4+) will be
+    # box crashes" goal. Admin-only internal services are
     # protected at the HTTP layer via Caddy + Authentik ForwardAuth, not
     # at the network layer.
     services.openssh = {
@@ -135,7 +135,7 @@
     #            inactive during initrd, so this rule is a defensive
     #            no-op post-boot — but listing it makes the intent
     #            explicit for anyone reading the config.
-    #   - 80/443 are added by self.nixosModules.caddy (Phase 4) so the
+    #   - 80/443 are added by self.nixosModules.caddy so the
     #            port list lives next to the service that needs it.
     # Port 22 is deliberately NOT opened. Hetzner rescue PXE-boots its
     # own kernel so the production firewall is bypassed while rescue
@@ -147,13 +147,12 @@
       allowedTCPPorts = [62222 2222];
     };
 
-    # Phase 1c: unattended security updates. `operation = "boot"` stages
+    # Unattended security updates. `operation = "boot"` stages
     # new generations into the bootloader without activating immediately,
     # so openssh/nginx don't restart mid-session — the next reboot picks
     # the new generation up. No `--update-input nixpkgs` here: the server
-    # is a puller, the laptop (and later CI in Phase 3c) is the authority
-    # on what's in flake.lock. When Phase 3c lands and CI starts bumping
-    # the lock weekly, this stays unchanged.
+    # is a puller; the laptop and CI are the authority on what's in
+    # flake.lock.
     system.autoUpgrade = {
       enable = true;
       flake = "github:Riezebos/nix";
@@ -172,9 +171,9 @@
     };
 
     # Dedicated activation user. Used by `nixos-rebuild --target-host` from the
-    # laptop today, and by deploy-rs / CI once Phase 3b lands. The matching
-    # private key lives at ~/.config/foundry-bootstrap/deploy_ed25519 on the
-    # laptop; add it as a GitHub Actions secret during Phase 3b.
+    # laptop and by deploy-rs / CI. The matching private key lives at
+    # ~/.config/foundry-bootstrap/deploy_ed25519 on the laptop and as a GitHub
+    # Actions secret.
     users.users.deploy = {
       isNormalUser = true;
       extraGroups = ["wheel"];
@@ -204,7 +203,7 @@
     sops.age.sshKeyPaths = ["/etc/ssh/ssh_host_ed25519_key"];
     sops.defaultSopsFile = ./secrets.yaml;
 
-    # Phase 2 smoke-test secret. After activation, `cat /run/secrets/test`
+    # sops-nix smoke-test secret. After activation, `cat /run/secrets/test`
     # as root should print "hello from sops-nix". Remove once we have a
     # real secret referencing `secrets.yaml`.
     sops.secrets.test = {};

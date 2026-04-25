@@ -23,9 +23,9 @@
       hostName = "foundry.simonito.com";
 
       # Foundry binds on 0.0.0.0 unconditionally; the host firewall only
-      # exposes 80/443 (Caddy) and 22/2222 (SSH), so 30012 is reachable
-      # only via the reverse proxy. Port choice: server_plan.md Phase 4
-      # uses 30012 to leave room for parallel versions (v13 → 30013).
+      # exposes 80/443 (Caddy) and 62222/2222 (SSH), so 30012 is reachable
+      # only via the reverse proxy. Use 30012 to leave room for parallel
+      # versions later (v13 -> 30013).
       port = 30012;
       dataDir = "/var/lib/foundryvtt/v12";
 

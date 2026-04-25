@@ -1,10 +1,9 @@
 name: update-flake-lock
 
-# Phase 3c of server_plan.md. Once a week the bot bumps flake.lock and
-# opens a PR; the build workflow then runs against the PR head so we
-# know before merging whether the new inputs actually build. Merging
-# the PR triggers the deploy workflow, which ships the bumped inputs
-# to the box — server autoUpgrade pulls from `github:Riezebos/nix`
+# Once a week the bot bumps flake.lock and opens a PR; the build workflow then
+# runs against the PR head so we know before merging whether the new inputs
+# actually build. Merging the PR triggers the deploy workflow, which ships the
+# bumped inputs to the box. Server autoUpgrade pulls from `github:Riezebos/nix`
 # nightly so the server converges shortly after.
 
 on:

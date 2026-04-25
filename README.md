@@ -1,40 +1,79 @@
-# Nix/Home Manager flake configuration
+# Nix configuration
 
-This repository contains my personal Nix/Home Manager configuration. I currently use Nix mainly in Home Manager and am very happy with it.
+Personal Nix flake for my laptops, development environments, and the `foundry`
+NixOS server.
 
-Main features:
+This repository currently manages:
 
-- Each machine has the same command line tools with the same configuration (zsh, starship, git, ...)
-- Shared command history between multiple machines thanks to atuin
+- Home Manager configs for `simon-darwin`, `simon-m4`, and `simon-linux`
+- a nix-darwin system config for `Simons-MacBook-Air`
+- the `foundry` NixOS server, including Foundry VTT, Caddy, Authentik,
+  monitoring, backups, alerting, CrowdSec, and PostgreSQL
 
-I tried using nix-darwin and NixOS, but at the moment they don't bring much value to me. I work with Python a lot, in various team structures, and for now I want to keep using regular virtual environments for my Python projects, which seems like a hassle in NixOS. Thanks to nix-darwin I can now do sudo using Touch ID on my Macbook, but I don't use it for much else.
+## Common commands
 
-## Note to self: adding a new mac machine (with Determinate nix)
+```bash
+# Apply Home Manager config on the primary Mac
+home-manager switch --flake .#simon-darwin
+# or:
+hm-mac
+
+# Validate the flake and pre-commit hooks
+nix flake check
+
+# Enter the dev shell
+nix develop
+
+# Format Nix files
+alejandra .
+
+# Edit sops-encrypted server secrets
+sops modules/hosts/foundry/secrets.yaml
+
+# Unlock foundry after a reboot
+foundry-unlock
 ```
-nix run home-manager/master -- switch --flake .#simon-m4
+
+Normal server deploys happen through GitHub Actions after changes land on
+`main`. The laptop-driven fallback is documented in
+[`docs/foundry/operations.md`](docs/foundry/operations.md).
+
+## Repository layout
+
+```text
+flake.nix
+modules/
+  parts.nix
+  home/
+  darwin/
+  hosts/foundry/
+  features/
+  deploy.nix
+hosts/foundry/hardware-configuration.nix
+docs/
 ```
 
-## Note to self: adding a new linux machine
-```
-nix --experimental-features 'nix-command flakes' run home-manager/master -- --experimental-features 'nix-command flakes' switch --flake .#simon-linux
-atuin login
-```
+`flake.nix` is intentionally small: it calls `flake-parts.lib.mkFlake` and
+auto-loads `modules/` through `import-tree`. Every `.nix` file under
+`modules/` must therefore be a flake-parts module. Plain NixOS modules belong
+outside that tree unless they are wrapped and exported from a flake-parts
+module.
 
-## Very basic steps to set this up yourself
+## Documentation
 
-Setting this up can be a bit confusing. Nix will build all of its own packages in `/nix` and symlink them to the right place. It will also create config files like "~/.zshrc". The nix language is often described as "json with functions". The docs and examples can sometimes be confusing. For me the deterministic and portable nature of my home directory is worth the learning curve. It's quite a cool system!
-
-- Install Nix: https://nixos.org/download/
-- Create a new folder and initialiase home-manager: `nix --experimental-features 'nix-command flakes' run home-manager/master -- init --switch`
-- Add your configuration (similar to flake.nix and shared/home.nix from this repository)
-- Enable your configuration: `home-manager switch --flake .#<config-name>` (in my case config-name is either simon-darwin or simon-linux)
-- You will probably get some errors that either tell you what to do or you can solve them by googling (e.g. needing to run the command with  `--experimental-features 'nix-command flakes'` the first time or that you need to move `~/.zshrc` because it will now be managed by home-manager)
-
-## Links that helped me
-
-- [Setting up your dotfiles with home-manager as a flake · Chris Portela](https://www.chrisportela.com/posts/home-manager-flake/)
-- [home-manager](https://nix-community.github.io/home-manager/)
-- [Nix language basics — nix.dev documentation](https://nix.dev/tutorials/nix-language)
-- [Flakes - NixOS Wiki](https://nixos.wiki/wiki/Flakes)
-- [GitHub - dminca/nix-config: My Nix configuration for setting up aarch64-darwin & x86\_64-darwin workstations](https://github.com/dminca/nix-config)
-- [Github - Code search results - "path:home.nix"](https://github.com/search?q=path%3Ahome.nix&type=code)
+- [Architecture](docs/architecture.md): flake layout, nixpkgs split, module
+  conventions, CI/pre-commit shape.
+- [New machine bootstrap](docs/bootstrap-new-machine.md): setting up a laptop
+  or Linux user environment from this flake.
+- [Foundry overview](docs/foundry/overview.md): current server state and
+  service map.
+- [Foundry operations](docs/foundry/operations.md): routine unlock, deploy,
+  verification, and key-rotation tasks.
+- [Foundry backups](docs/foundry/backups.md): restic model, restore commands,
+  PostgreSQL dumps, and restore drill.
+- [Foundry recovery](docs/foundry/recovery.md): rescue mode, reinstall, sops
+  re-keying, and bootstrap gotchas.
+- [Foundry security](docs/foundry/security.md): public surface, secrets model,
+  auth, and deliberate tradeoffs.
+- [Optional roadmap](docs/foundry/optional-roadmap.md): nice-to-have future
+  work now that the server baseline is finished.
