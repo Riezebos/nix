@@ -43,15 +43,19 @@ jobs:
       # and cannot be built on a Linux runner.
       #
       # FoundryVTT's installer zip is also not available to GitHub Actions
-      # because it is a personal-license file. Do not build deploy-activate
-      # here: it builds the system closure and would require the zip. The
-      # deploy job uses deploy-rs remoteBuild so the real closure builds on
-      # foundry, where the zip is seeded into the Nix store.
-      - name: Build checks
+      # because it is a personal-license file. Do not build deploy-rs checks
+      # here: both the activator and schema checks realize the deploy profile,
+      # which builds the system closure and would require the zip. The deploy
+      # job uses deploy-rs remoteBuild so the real closure builds on foundry,
+      # where the zip is seeded into the Nix store.
+      - name: Build pre-commit checks
         run: |
           nix build --print-build-logs \
-            .#checks.x86_64-linux.pre-commit \
-            .#checks.x86_64-linux.deploy-schema
+            .#checks.x86_64-linux.pre-commit
+
+      - name: Evaluate deploy config
+        run: |
+          nix eval --json .#deploy >/dev/null
 
       # Instantiate the system closure. This catches eval errors in the
       # foundry module graph without trying to build the proprietary Foundry
