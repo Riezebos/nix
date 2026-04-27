@@ -120,7 +120,7 @@
         PermitRootLogin = "no";
         KbdInteractiveAuthentication = false;
         MaxAuthTries = 3;
-        AllowUsers = ["simon" "deploy"];
+        AllowUsers = ["simon" "deploy" "foundryvtt-manager"];
       };
     };
 
@@ -182,8 +182,21 @@
       ];
     };
 
+    # Operator account for managing the Foundry VTT service without full admin
+    # rights. Can restart/stop/start the service via the sudo rules below, and
+    # can read/write files in the data directory via group membership.
+    users.users.foundryvtt-manager = {
+      isNormalUser = true;
+      extraGroups = ["foundryvtt"];
+      openssh.authorizedKeys.keys = [
+        # SSH public key — add when available
+      ];
+    };
+
     # Passwordless sudo for deploy user — required by deploy-rs (and
     # `nixos-rebuild --use-remote-sudo`) to invoke switch-to-configuration.
+    # foundryvtt-manager gets targeted rules: only the specific systemctl
+    # verbs for the foundryvtt.service, nothing else.
     security.sudo.extraRules = [
       {
         users = ["deploy"];
@@ -194,6 +207,41 @@
           }
         ];
       }
+      {
+        users = ["foundryvtt-manager"];
+        commands = [
+          {
+            command = "/run/current-system/sw/bin/systemctl start foundryvtt.service";
+            options = ["NOPASSWD"];
+          }
+          {
+            command = "/run/current-system/sw/bin/systemctl stop foundryvtt.service";
+            options = ["NOPASSWD"];
+          }
+          {
+            command = "/run/current-system/sw/bin/systemctl restart foundryvtt.service";
+            options = ["NOPASSWD"];
+          }
+          {
+            command = "/run/current-system/sw/bin/systemctl reload foundryvtt.service";
+            options = ["NOPASSWD"];
+          }
+          {
+            command = "/run/current-system/sw/bin/systemctl status foundryvtt.service";
+            options = ["NOPASSWD"];
+          }
+        ];
+      }
+    ];
+
+    # UMask 0002 makes all files/dirs created by the Foundry process
+    # group-writable, so foundryvtt-manager (in the foundryvtt group) can
+    # edit them. StateDirectoryMode opens the top-level state dir to the group.
+    # The tmpfiles rule retrofits the existing v14 directory on upgrades.
+    systemd.services.foundryvtt.serviceConfig.UMask = lib.mkForce "0002";
+    systemd.services.foundryvtt.serviceConfig.StateDirectoryMode = lib.mkForce "0770";
+    systemd.tmpfiles.rules = [
+      "d /var/lib/foundryvtt/v14 0770 foundryvtt foundryvtt -"
     ];
 
     # sops-nix: use the server's SSH ed25519 host key as the age decryption
