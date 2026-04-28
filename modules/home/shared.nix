@@ -56,6 +56,13 @@
           ".hg"
         ];
       };
+      gh = {
+        enable = true;
+        settings = {
+          # Disable telemetry via the gh config file (~/.config/gh/config.yml)
+          telemetry = "disabled";
+        };
+      };
       git = {
         enable = true;
         lfs.enable = true;
@@ -334,18 +341,6 @@
           ignoreSpace = false;
         };
         initContent = lib.mkAfter ''
-          export PATH="$HOME/.cargo/bin:$PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-          export PATH="$HOME/.rd/bin:$PATH"
-
-          export PIP_REQUIRE_VIRTUALENV=1
-          export PIP_USE_PEP517=1
-          export MANPAGER="sh -c 'col -bx | bat -l man -p'"
-          export LANG="en_US.UTF-8"
-          export LC_CTYPE="en_US.UTF-8"
-          export LC_ALL="en_US.UTF-8"
-          export LANGUAGE="en_US.UTF-8"
-
           _zsh_autosuggest_strategy_atuin_auto() {
               suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
           }
@@ -551,7 +546,23 @@
     # Linux: ~/.config/…). The `.sops.yaml` in this repo refers to the key
     # at ~/.config/sops/age/keys.txt — point sops at it explicitly so the
     # same path works on every machine.
-    home.sessionVariables.SOPS_AGE_KEY_FILE = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
+    home.sessionVariables = {
+      SOPS_AGE_KEY_FILE = "${config.home.homeDirectory}/.config/sops/age/keys.txt";
+      PIP_REQUIRE_VIRTUALENV = "1";
+      PIP_USE_PEP517 = "1";
+      MANPAGER = "sh -c 'col -bx | bat -l man -p'";
+      LANG = "en_US.UTF-8";
+      LC_CTYPE = "en_US.UTF-8";
+      LC_ALL = "en_US.UTF-8";
+      LANGUAGE = "en_US.UTF-8";
+      DO_NOT_TRACK = "1";
+    };
+
+    home.sessionPath = [
+      "$HOME/.cargo/bin"
+      "$HOME/.local/bin"
+      "$HOME/.rd/bin"
+    ];
 
     home.packages = with pkgs; [
       alejandra
@@ -576,7 +587,6 @@
       glab
       crane
       cachix
-      gh
       sops
       age
       ssh-to-age
