@@ -46,10 +46,21 @@
       };
     };
 
+    # Caddy serves the ACME http-01 challenge for pgbouncer's cert. It needs
+    # to traverse the webroot, which acme.nix chgrp's to the cert group
+    # (pgbouncer); adding caddy to that group is the smallest fix. The auth
+    # file is 0400 so caddy still can't read it.
+    users.users.caddy.extraGroups = ["pgbouncer"];
+
     services.caddy.virtualHosts."http://${domain}".extraConfig = ''
-      root * ${acmeWebroot}
-      file_server /.well-known/acme-challenge/*
-      respond 404
+      @acme path /.well-known/acme-challenge/*
+      handle @acme {
+        root * ${acmeWebroot}
+        file_server
+      }
+      handle {
+        respond 404
+      }
     '';
 
     services.pgbouncer = {
