@@ -17,6 +17,7 @@
       self.nixosModules.authentik
       self.nixosModules.crowdsec
       self.nixosModules.postgresql
+      self.nixosModules.deliverable
       self.nixosModules.restic
       self.nixosModules.monitoring
       self.nixosModules.alerting

@@ -86,6 +86,7 @@ modules/
     authentik.nix
     caddy.nix
     crowdsec.nix
+    deliverable.nix
     foundryvtt.nix
     monitoring.nix
     postgresql.nix

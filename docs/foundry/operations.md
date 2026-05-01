@@ -121,6 +121,8 @@ Expected:
 
 ```bash
 ssh foundry sudo -u postgres psql -tAc '\l'
+ssh foundry sudo systemctl status pgbouncer.service --no-pager
+ssh foundry sudo ss -tulpn | rg ':6432'
 ssh foundry sudo systemctl status postgresqlBackup.service --no-pager
 ssh foundry sudo ls -lh /var/backup/postgresql
 ssh foundry sudo -u postgres zstd -dc /var/backup/postgresql/all.sql.zstd | head
@@ -128,7 +130,8 @@ ssh foundry sudo -u postgres zstd -dc /var/backup/postgresql/all.sql.zstd | head
 
 Expected:
 
-- the `authentik` database exists
+- the `authentik` and `deliverable` databases exist
+- PgBouncer is listening on public port `6432`
 - `postgresqlBackup.service` succeeds
 - `all.sql.zstd` is recent
 - the dump starts with roles and database DDL

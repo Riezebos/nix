@@ -233,6 +233,10 @@
         cmdline = [".*(postgres|postgresql).*"];
       }
       {
+        name = "pgbouncer";
+        cmdline = [".*/pgbouncer( |$).*"];
+      }
+      {
         name = "redis-authentik";
         cmdline = [".*redis-server.*16379.*"];
       }
@@ -245,7 +249,7 @@
         cmdline = [".*process-exporter.*"];
       }
     ];
-    serviceUnits = "foundryvtt.service|caddy.service|grafana.service|authentik-server.service|authentik-worker.service|loki.service|victoriametrics.service|alloy.service|postgresql.service|redis-authentik.service";
+    serviceUnits = "foundryvtt.service|caddy.service|grafana.service|authentik-server.service|authentik-worker.service|loki.service|victoriametrics.service|alloy.service|postgresql.service|pgbouncer.service|redis-authentik.service";
     serviceProcessRegex = lib.concatStringsSep "|" (map (service: service.name) serviceProcesses);
     backupTimers = "restic-backups-foundry.timer|restic-backups-foundry-journal.timer|restic-backups-foundry-postgresql.timer|restic-check-foundry.timer";
 

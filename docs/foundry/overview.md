@@ -53,11 +53,12 @@ ssh -p 2222 root@foundry
 | Caddy | TLS and reverse proxy | Public ports 80/443 |
 | Authentik | Admin identity provider | Public vhost |
 | Grafana | Dashboards | Public vhost with OIDC |
+| PgBouncer | SQL training connection pooler | Public PostgreSQL protocol with TLS |
 | VictoriaMetrics | Metrics store | Loopback only |
 | node_exporter | Host metrics | Loopback only |
 | Loki | Log store | Loopback only |
 | Alloy | Journal/log shipping | Local agent |
-| CrowdSec | SSH/Caddy abuse detection | Local engine + firewall bouncer |
+| CrowdSec | SSH/Caddy/PgBouncer abuse detection | Local engine + firewall bouncer |
 | PostgreSQL | Shared application database | Local service |
 | restic | Backups to Hetzner Storage Box | Outbound only |
 | Healthchecks.io pings | Failure/dead-man alerts | Outbound only |

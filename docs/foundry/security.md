@@ -10,11 +10,13 @@ Allowed inbound ports:
 |---|---|
 | 80 | Caddy HTTP / ACME redirect |
 | 443 | Caddy HTTPS |
+| 6432 | PgBouncer for SQL training connections |
 | 62222 | main-system SSH |
 | 2222 | initrd LUKS unlock SSH |
 
 Port 22 is deliberately left for Hetzner rescue mode and is not open on the
-running system.
+running system. PostgreSQL itself is not exposed; public SQL clients terminate
+TLS at PgBouncer, which connects to PostgreSQL over the local Unix socket.
 
 The real server IP is not stored in this repo. Use `Host foundry` in
 `~/.ssh/config`; helpers resolve it at runtime.
@@ -79,8 +81,8 @@ auth layer.
 
 ## CrowdSec
 
-CrowdSec watches SSH and Caddy logs. The firewall bouncer enforces decisions
-through nftables.
+CrowdSec watches SSH, Caddy, and PgBouncer logs. The firewall bouncer enforces
+decisions through nftables.
 
 The Caddy-specific CrowdSec bouncer and AppSec path are intentionally deferred:
 they add Nix maintenance cost and are not needed for the current threat model.

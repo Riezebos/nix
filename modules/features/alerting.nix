@@ -109,6 +109,7 @@
       grafana = "grafana";
       victoriametrics = "victoriametrics";
       alloy = "alloy";
+      pgbouncer = "pgbouncer";
     };
 
     onFailureHook = slug: {
