@@ -122,6 +122,11 @@
       GRANT engineers_group TO "${databaseUser}" WITH ADMIN OPTION;
       GRANT analysts_group TO "${databaseUser}" WITH ADMIN OPTION;
 
+      -- Cleanup needs to terminate trainees' backend sessions before DROP USER,
+      -- otherwise PgBouncer keeps stale backends in its pool keyed to the dropped
+      -- role's OID, and the next trainee with the same name hits "invalid role OID".
+      GRANT pg_signal_backend TO "${databaseUser}";
+
       GRANT USAGE, CREATE ON SCHEMA order_forecaster TO trainee_group;
       GRANT USAGE ON SCHEMA public TO trainee_group;
       GRANT USAGE ON SCHEMA internal TO trainee_group;
