@@ -8,9 +8,131 @@
     domain = "database.datamastery.nl";
     database = "deliverable";
     databaseUser = "deliverable";
+    pgbouncerAuthUser = "pgbouncer_auth";
     pgbouncerPort = 6432;
     acmeWebroot = "/var/lib/acme/acme-challenge";
     acmeCertDir = config.security.acme.certs.${domain}.directory;
+    deliverableSchemas = ["public" "order_forecaster" "engineers" "analysts" "internal"];
+    deliverableSchemaSqlArray = lib.concatMapStringsSep ", " (s: "'${s}'") deliverableSchemas;
+    deliverableSchemaSql =
+      lib.concatMapStringsSep "\n" (schema: ''
+        CREATE SCHEMA IF NOT EXISTS "${schema}" AUTHORIZATION "${databaseUser}";
+        ALTER SCHEMA "${schema}" OWNER TO "${databaseUser}";
+      '')
+      deliverableSchemas;
+    deliverablePrivilegeSql = pkgs.writeText "deliverable-privileges.sql" ''
+      ALTER ROLE "${databaseUser}" SET createrole_self_grant = 'set, inherit';
+
+      CREATE SCHEMA IF NOT EXISTS pgbouncer AUTHORIZATION postgres;
+      ALTER SCHEMA pgbouncer OWNER TO postgres;
+      REVOKE ALL ON SCHEMA pgbouncer FROM PUBLIC;
+      GRANT USAGE ON SCHEMA pgbouncer TO "${pgbouncerAuthUser}";
+
+      CREATE OR REPLACE FUNCTION pgbouncer.user_lookup(
+        IN username text,
+        OUT uname text,
+        OUT phash text
+      )
+      RETURNS record
+      LANGUAGE sql
+      SECURITY DEFINER
+      SET search_path = pg_catalog
+      AS $$
+        SELECT rolname, rolpassword
+        FROM pg_authid
+        WHERE rolname = username
+          AND rolcanlogin
+          AND rolpassword IS NOT NULL
+      $$;
+      ALTER FUNCTION pgbouncer.user_lookup(text) OWNER TO postgres;
+      REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM PUBLIC;
+      GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO "${pgbouncerAuthUser}";
+
+      ${deliverableSchemaSql}
+
+      DO $$
+      DECLARE
+        obj record;
+      BEGIN
+        FOR obj IN
+          SELECT n.nspname, c.relname, c.relkind
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = ANY (ARRAY[${deliverableSchemaSqlArray}])
+            AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+            AND pg_get_userbyid(c.relowner) <> '${databaseUser}'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend d
+              WHERE d.objid = c.oid
+                AND d.deptype = 'e'
+            )
+        LOOP
+          EXECUTE format(
+            'ALTER %s %I.%I OWNER TO %I',
+            CASE obj.relkind
+              WHEN 'S' THEN 'SEQUENCE'
+              WHEN 'v' THEN 'VIEW'
+              WHEN 'm' THEN 'MATERIALIZED VIEW'
+              WHEN 'f' THEN 'FOREIGN TABLE'
+              ELSE 'TABLE'
+            END,
+            obj.nspname,
+            obj.relname,
+            '${databaseUser}'
+          );
+        END LOOP;
+
+        FOR obj IN
+          SELECT
+            n.nspname,
+            p.proname,
+            p.prokind,
+            pg_get_function_identity_arguments(p.oid) AS args
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = ANY (ARRAY[${deliverableSchemaSqlArray}])
+            AND pg_get_userbyid(p.proowner) <> '${databaseUser}'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM pg_depend d
+              WHERE d.objid = p.oid
+                AND d.deptype = 'e'
+            )
+        LOOP
+          EXECUTE format(
+            'ALTER %s %I.%I(%s) OWNER TO %I',
+            CASE obj.prokind
+              WHEN 'p' THEN 'PROCEDURE'
+              WHEN 'a' THEN 'AGGREGATE'
+              ELSE 'FUNCTION'
+            END,
+            obj.nspname,
+            obj.proname,
+            obj.args,
+            '${databaseUser}'
+          );
+        END LOOP;
+      END
+      $$;
+
+      GRANT USAGE, CREATE ON SCHEMA order_forecaster TO trainee_group;
+      GRANT USAGE ON SCHEMA public TO trainee_group;
+      GRANT USAGE ON SCHEMA internal TO trainee_group;
+      GRANT SELECT ON ALL TABLES IN SCHEMA public TO trainee_group;
+      GRANT SELECT ON ALL TABLES IN SCHEMA internal TO trainee_group;
+      ALTER DEFAULT PRIVILEGES FOR ROLE "${databaseUser}" IN SCHEMA public GRANT SELECT ON TABLES TO trainee_group;
+      ALTER DEFAULT PRIVILEGES FOR ROLE "${databaseUser}" IN SCHEMA internal GRANT SELECT ON TABLES TO trainee_group;
+      ALTER DEFAULT PRIVILEGES FOR ROLE "${databaseUser}" IN SCHEMA order_forecaster GRANT ALL ON TABLES TO trainee_group;
+
+      GRANT USAGE ON SCHEMA engineers TO engineers_group;
+      GRANT SELECT ON ALL TABLES IN SCHEMA engineers TO engineers_group;
+      ALTER DEFAULT PRIVILEGES FOR ROLE "${databaseUser}" IN SCHEMA engineers GRANT SELECT ON TABLES TO engineers_group;
+
+      GRANT USAGE ON SCHEMA analysts TO analysts_group;
+      GRANT SELECT ON ALL TABLES IN SCHEMA analysts TO analysts_group;
+      ALTER DEFAULT PRIVILEGES FOR ROLE "${databaseUser}" IN SCHEMA analysts GRANT SELECT ON TABLES TO analysts_group;
+    '';
     databaseHelpPage = pkgs.writeTextDir "index.html" ''
       <!doctype html>
       <html lang="en">
@@ -101,15 +223,35 @@
         {
           name = databaseUser;
           ensureDBOwnership = true;
+          ensureClauses.createrole = true;
+        }
+        {name = pgbouncerAuthUser;}
+        {
+          name = "trainee_group";
+          ensureClauses.login = false;
+        }
+        {
+          name = "engineers_group";
+          ensureClauses.login = false;
+        }
+        {
+          name = "analysts_group";
+          ensureClauses.login = false;
         }
       ];
 
-      # PgBouncer is the only public PostgreSQL-protocol endpoint. It reaches
-      # the backend over the local Unix socket as the database owner.
+      # PgBouncer is the only public PostgreSQL-protocol endpoint. The owner
+      # role keeps peer auth for administration; trainee roles created by the
+      # course prep scripts use their PostgreSQL passwords through PgBouncer's
+      # auth_query path.
       authentication = lib.mkBefore ''
+        local ${database} postgres peer map=postgres
+        local ${database} ${pgbouncerAuthUser} peer map=pgbouncer-auth
         local ${database} ${databaseUser} peer map=pgbouncer-deliverable
+        local ${database} all scram-sha-256
       '';
       identMap = lib.mkAfter ''
+        pgbouncer-auth pgbouncer ${pgbouncerAuthUser}
         pgbouncer-deliverable pgbouncer ${databaseUser}
       '';
     };
@@ -164,7 +306,7 @@
       enable = true;
       openFirewall = true;
       settings = {
-        databases.${database} = "host=/run/postgresql port=5432 dbname=${database} user=${databaseUser} pool_size=10 max_db_connections=20";
+        databases.${database} = "host=/run/postgresql port=5432 dbname=${database} pool_size=10 max_db_connections=20";
 
         pgbouncer = {
           listen_addr = "*";
@@ -183,6 +325,8 @@
 
           auth_type = "scram-sha-256";
           auth_file = config.sops.secrets."deliverable/pgbouncer_auth".path;
+          auth_user = pgbouncerAuthUser;
+          auth_query = "SELECT uname, phash FROM pgbouncer.user_lookup($1)";
 
           client_tls_sslmode = "require";
           client_tls_cert_file = "${acmeCertDir}/fullchain.pem";
@@ -197,8 +341,25 @@
     };
 
     systemd.services.pgbouncer = {
-      wants = ["acme-${domain}.service"];
-      after = ["acme-${domain}.service"];
+      wants = ["acme-${domain}.service" "postgresql-deliverable-privileges.service"];
+      after = ["acme-${domain}.service" "postgresql-deliverable-privileges.service"];
+    };
+
+    systemd.services.postgresql-deliverable-privileges = {
+      description = "Prepare deliverable database privileges";
+      requires = ["postgresql.service" "postgresql-setup.service"];
+      after = ["postgresql.service" "postgresql-setup.service"];
+      wantedBy = ["multi-user.target"];
+      path = [config.services.postgresql.finalPackage];
+      serviceConfig = {
+        User = "postgres";
+        Group = "postgres";
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        psql -v ON_ERROR_STOP=1 -d ${database} -f ${deliverablePrivilegeSql}
+      '';
     };
 
     services.crowdsec.localConfig = {

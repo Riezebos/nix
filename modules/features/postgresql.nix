@@ -6,6 +6,7 @@
     # feature modules add their own `ensureDatabases` / `ensureUsers`; this
     # module owns the server and the logical-backup policy.
     services.postgresql.enable = true;
+    services.postgresql.settings.password_encryption = "scram-sha-256";
 
     # Lock down cross-database visibility: by default PUBLIC has CONNECT on
     # every database, so any role on the cluster can reach every other DB.
