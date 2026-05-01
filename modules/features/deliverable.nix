@@ -79,6 +79,7 @@
           client_tls_sslmode = "require";
           client_tls_cert_file = "${acmeCertDir}/fullchain.pem";
           client_tls_key_file = "${acmeCertDir}/key.pem";
+          client_tls_ca_file = "/etc/ssl/certs/ca-certificates.crt";
 
           log_connections = 1;
           log_disconnections = 1;
