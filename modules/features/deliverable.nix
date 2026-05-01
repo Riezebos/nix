@@ -87,6 +87,11 @@
       };
     };
 
+    systemd.services.pgbouncer = {
+      wants = ["acme-${domain}.service"];
+      after = ["acme-${domain}.service"];
+    };
+
     services.crowdsec.localConfig = {
       acquisitions = [
         {
