@@ -40,7 +40,7 @@
       AS $$
         SELECT rolname, rolpassword
         FROM pg_authid
-        WHERE rolname = username
+        WHERE lower(rolname) = lower(username)
           AND rolcanlogin
           AND rolpassword IS NOT NULL
       $$;
@@ -115,6 +115,12 @@
         END LOOP;
       END
       $$;
+
+      GRANT CONNECT ON DATABASE "${database}" TO "${pgbouncerAuthUser}", trainee_group;
+
+      GRANT trainee_group TO "${databaseUser}" WITH ADMIN OPTION;
+      GRANT engineers_group TO "${databaseUser}" WITH ADMIN OPTION;
+      GRANT analysts_group TO "${databaseUser}" WITH ADMIN OPTION;
 
       GRANT USAGE, CREATE ON SCHEMA order_forecaster TO trainee_group;
       GRANT USAGE ON SCHEMA public TO trainee_group;
