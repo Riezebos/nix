@@ -47,6 +47,52 @@
       exit 0
     '';
 
+    healthchecksFailAfter = pkgs.writeShellScript "healthchecks-fail-after" ''
+      slug="''${1:-}"
+      threshold="''${2:-}"
+      if [ -z "$slug" ]; then
+        echo "healthchecks-fail-after: slug argument missing; skipping" >&2
+        exit 0
+      fi
+      case "$threshold" in
+        ""|*[!0-9]*|0)
+          echo "healthchecks-fail-after: invalid threshold '$threshold' for $slug; skipping" >&2
+          exit 0
+          ;;
+      esac
+
+      state_dir=/run/healthchecks-fail-after
+      state_file="$state_dir/$slug.count"
+      mkdir -p "$state_dir"
+
+      count=0
+      if [ -r "$state_file" ]; then
+        IFS= read -r count < "$state_file" || count=0
+      fi
+      case "$count" in
+        ""|*[!0-9]*) count=0 ;;
+      esac
+
+      count=$((count + 1))
+      printf '%s\n' "$count" > "$state_file"
+
+      if [ "$count" -lt "$threshold" ]; then
+        echo "healthchecks-fail-after: $slug failure $count/$threshold; not pinging /fail yet" >&2
+        exit 0
+      fi
+
+      echo "healthchecks-fail-after: $slug failure $count/$threshold; pinging /fail" >&2
+      exec ${healthchecksPing} "$slug" /fail
+    '';
+
+    healthchecksResetAndPing = pkgs.writeShellScript "healthchecks-reset-and-ping" ''
+      slug="''${1:-}"
+      if [ -n "$slug" ]; then
+        rm -f "/run/healthchecks-fail-after/$slug.count"
+      fi
+      exec ${healthchecksPing} "$@"
+    '';
+
     healthchecksEnvFile = config.sops.templates."healthchecks-ping.env".path;
 
     # Long-running services: we only want a fail alert, not a dead-man
@@ -67,6 +113,10 @@
 
     onFailureHook = slug: {
       onFailure = ["healthchecks-fail@${slug}.service"];
+    };
+
+    onSecondFailureHook = slug: {
+      onFailure = ["healthchecks-fail-after-2@${slug}.service"];
     };
   in {
     # Raw ping key in sops. The sops template below wraps it as an
@@ -106,6 +156,15 @@
           };
         };
 
+        "healthchecks-fail-after-2@" = {
+          description = "Healthchecks.io fail ping for %i after two consecutive failures";
+          serviceConfig = {
+            Type = "oneshot";
+            EnvironmentFile = healthchecksEnvFile;
+            ExecStart = "${healthchecksFailAfter} %i 2";
+          };
+        };
+
         restic-backups-foundry =
           onFailureHook "daily-backup"
           // {
@@ -119,11 +178,11 @@
         # should be ~1 h with 15 min grace — four pings per hour, one miss
         # is fine, two misses means something is wrong.
         restic-backups-foundry-journal =
-          onFailureHook "journal-backup"
+          onSecondFailureHook "journal-backup"
           // {
             serviceConfig = {
               EnvironmentFile = healthchecksEnvFile;
-              ExecStartPost = "${healthchecksPing} journal-backup";
+              ExecStartPost = "${healthchecksResetAndPing} journal-backup";
             };
           };
 
