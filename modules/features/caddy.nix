@@ -74,6 +74,29 @@
         #   reverse_proxy 127.0.0.1:<app-port>
         # }
       '';
+
+      # agent-sandcastle launcher. Authentik's embedded proxy outpost gates
+      # access via forward_auth — the launcher itself has no built-in auth,
+      # so without this header pass-through any visitor could spawn
+      # sandboxes. The X-Authentik-* headers are copied through verbatim so
+      # the launcher can attribute actions to a real user once the M2 host
+      # adapter lands.
+      virtualHosts."sandcastle.simonito.com".extraConfig = ''
+        encode zstd gzip
+        ${mkAccessLog "sandcastle"}
+
+        route {
+          reverse_proxy /outpost.goauthentik.io/* 127.0.0.1:9000
+          forward_auth 127.0.0.1:9000 {
+            uri /outpost.goauthentik.io/auth/caddy
+            copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid X-Authentik-Jwt X-Authentik-Meta-Jwks X-Authentik-Meta-Outpost X-Authentik-Meta-Provider X-Authentik-Meta-App X-Authentik-Meta-Version
+            trusted_proxies private_ranges
+          }
+          reverse_proxy 127.0.0.1:4000
+        }
+
+        ${commonHeaders}
+      '';
     };
 
     # ACME HTTP-01 needs 80 reachable; the proxy needs 443. Added here
