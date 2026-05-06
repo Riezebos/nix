@@ -1,11 +1,9 @@
 {inputs, ...}: {
   flake.nixosModules.agentSandcastleLauncher = {config, ...}: {
-    # Only the launcher module — explicitly NOT `nixosModules.host`. The
-    # `host` overlay drags microvm.nix + agent-sandcastle's pinned unstable
-    # nixpkgs into the foundry pkgs set, but foundry isn't running KVM
-    # sandboxes itself yet. Keep the surface minimal: just the Phoenix
-    # release behind Caddy + Authentik.
-    imports = [inputs.agent-sandcastle.nixosModules.launcher];
+    imports = [
+      inputs.agent-sandcastle.nixosModules.host
+      inputs.agent-sandcastle.nixosModules.launcher
+    ];
 
     services.agent-sandcastle.launcher = {
       enable = true;
@@ -20,6 +18,27 @@
       group = "agent-sandcastle";
       mode = "0400";
       restartUnits = ["agent-sandcastle-launcher.service"];
+    };
+
+    services.agent-sandcastle.networking.enable = true;
+
+    services.agent-sandcastle.sandboxStore = {
+      enable = true;
+      closureRoots = [
+        config.microvm.vms.sandcastle-smoke.config.config.system.build.toplevel
+        config.microvm.vms.sandcastle-smoke.config.config.microvm.declaredRunner
+      ];
+    };
+
+    microvm.vms.sandcastle-smoke = {
+      autostart = false;
+      config = inputs.agent-sandcastle.lib.mkSandbox {
+        name = "sandcastle-smoke";
+        networkMode = "tap";
+        useCuratedStore = true;
+        diskSizeMiB = 2048;
+        authorizedKeys = config.users.users.simon.openssh.authorizedKeys.keys;
+      };
     };
   };
 }
