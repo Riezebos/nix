@@ -1,5 +1,30 @@
 {...}: {
-  flake.nixosModules.crowdsec = {lib, ...}: {
+  flake.nixosModules.crowdsec = {
+    lib,
+    pkgs,
+    ...
+  }: let
+    # The bouncer's first ExecStart connects to the LAPI immediately. CrowdSec
+    # is Type=notify but its "ready" signal fires a touch before the HTTP
+    # listener is accepting connections, so even ordered after crowdsec.service
+    # the bouncer can win the race and exit 1. Block startup until the LAPI
+    # port answers so the real ExecStart succeeds on the first try and the
+    # nixos-rebuild switch sees a clean activation instead of a flapping unit.
+    # No external tools beyond sleep: the bouncer unit runs with an empty PATH
+    # in nftables mode, and the TCP probe is a bash /dev/tcp builtin (AF_INET
+    # is permitted by the unit's RestrictAddressFamilies).
+    waitForLapi = pkgs.writeShellScript "crowdsec-firewall-bouncer-wait-lapi" ''
+      for ((i = 0; i < 60; i++)); do
+        if (exec 3<>/dev/tcp/127.0.0.1/8080) 2>/dev/null; then
+          exec 3<&- 3>&-
+          exit 0
+        fi
+        ${pkgs.coreutils}/bin/sleep 1
+      done
+      echo "crowdsec LAPI on 127.0.0.1:8080 not reachable after 60s" >&2
+      exit 1
+    '';
+  in {
     # The firewall bouncer uses nftables mode. Flip the host firewall backend
     # once here so the allow-list remains declarative.
     networking.nftables.enable = true;
@@ -55,15 +80,13 @@
       StateDirectory = lib.mkForce "crowdsec";
     };
 
-    # The bouncer connects to the LAPI (127.0.0.1:8080) the instant it starts.
-    # CrowdSec's sd_notify "ready" fires slightly before the HTTP listener is
-    # actually accepting connections, so on a fresh start (and especially when
-    # both units restart together during a nixos-rebuild switch) the bouncer
-    # races ahead, gets "connection refused", and exits 1. Upstream sets no
-    # Restart policy, so it stays failed. Retry until the LAPI is reachable.
-    # This only adds Restart/RestartSec; it leaves the credential-loading
-    # serviceConfig from upstream untouched.
+    # Gate the bouncer on the LAPI being reachable (see waitForLapi above).
+    # mkAfter appends to upstream's ExecStartPre list (config generation +
+    # config test) rather than replacing it, so credential loading and the
+    # config check stay intact. Restart=on-failure is kept as a safety net for
+    # later LAPI restarts (e.g. crowdsec's own auto-update reloads).
     systemd.services.crowdsec-firewall-bouncer.serviceConfig = {
+      ExecStartPre = lib.mkAfter ["${waitForLapi}"];
       Restart = "on-failure";
       RestartSec = "5s";
     };
