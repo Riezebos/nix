@@ -54,5 +54,18 @@
       DynamicUser = lib.mkForce false;
       StateDirectory = lib.mkForce "crowdsec";
     };
+
+    # The bouncer connects to the LAPI (127.0.0.1:8080) the instant it starts.
+    # CrowdSec's sd_notify "ready" fires slightly before the HTTP listener is
+    # actually accepting connections, so on a fresh start (and especially when
+    # both units restart together during a nixos-rebuild switch) the bouncer
+    # races ahead, gets "connection refused", and exits 1. Upstream sets no
+    # Restart policy, so it stays failed. Retry until the LAPI is reachable.
+    # This only adds Restart/RestartSec; it leaves the credential-loading
+    # serviceConfig from upstream untouched.
+    systemd.services.crowdsec-firewall-bouncer.serviceConfig = {
+      Restart = "on-failure";
+      RestartSec = "5s";
+    };
   };
 }
