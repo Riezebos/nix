@@ -131,6 +131,10 @@ jobs:
       # checks; re-running them here just doubles latency.
       # Uses `apps.deploy-rs` from this flake (flake-locked input).
       - name: Deploy
+        # A wedged ssh/nix-daemon session or a unit that never finishes
+        # activating would otherwise hang here until GitHub's 6h default.
+        # A full remoteBuild deploy is minutes, so 45 is generous.
+        timeout-minutes: 45
         run: |
           nix run .#deploy-rs -- \
             --skip-checks \

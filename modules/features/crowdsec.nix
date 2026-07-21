@@ -85,10 +85,21 @@
     # config test) rather than replacing it, so credential loading and the
     # config check stay intact. Restart=on-failure is kept as a safety net for
     # later LAPI restarts (e.g. crowdsec's own auto-update reloads).
-    systemd.services.crowdsec-firewall-bouncer.serviceConfig = {
-      ExecStartPre = lib.mkAfter ["${waitForLapi}"];
-      Restart = "on-failure";
-      RestartSec = "5s";
+    systemd.services.crowdsec-firewall-bouncer = {
+      serviceConfig = {
+        ExecStartPre = lib.mkAfter ["${waitForLapi}"];
+        Restart = "on-failure";
+        RestartSec = "5s";
+      };
+
+      # Bound the retry. `Restart=on-failure` around a 60s blocking
+      # ExecStartPre means a genuinely-down LAPI (e.g. crowdsec itself
+      # crash-looping) makes `systemctl start` never return, which wedges
+      # `switch-to-configuration` and therefore the whole deploy. With a
+      # start limit the unit gives up and lands in `failed`, so activation
+      # reports a broken unit and moves on instead of hanging.
+      startLimitIntervalSec = 600;
+      startLimitBurst = 5;
     };
   };
 }

@@ -28,7 +28,22 @@ in {
     # Applies to both the nix-copy-closure step and deploy-rs's magic-
     # rollback confirm hook, so confirmation over ssh reaches the new
     # sshd after the firewall reload.
-    sshOpts = ["-o" "StrictHostKeyChecking=accept-new" "-o" "Port=62222"];
+    # `ServerAliveInterval`/`ServerAliveCountMax` — a `remoteBuild` deploy
+    # holds a long-lived `nix-daemon --stdio` session over this connection.
+    # Without keepalives a silently dropped TCP flow leaves both ends
+    # blocked in a read forever: the runner waits for build output, the
+    # server sleeps in `pipe_read`, and CI hangs until the 6h job limit.
+    # Fail the connection after ~2min of no response instead.
+    sshOpts = [
+      "-o"
+      "StrictHostKeyChecking=accept-new"
+      "-o"
+      "Port=62222"
+      "-o"
+      "ServerAliveInterval=30"
+      "-o"
+      "ServerAliveCountMax=4"
+    ];
 
     nodes.foundry = {
       # Placeholder. The real hostname/IP is not in this public repo; the
