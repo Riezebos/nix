@@ -332,6 +332,13 @@
       zsh = {
         enable = true;
         autocd = true;
+        # Home Manager owns ~/.zprofile; Homebrew's own installer normally
+        # appends `brew shellenv` there. Keep it (PATH, MANPATH, INFOPATH,
+        # HOMEBREW_*) so brew-installed tools stay on PATH in login shells.
+        # `~/.local/bin` (pipx) is covered by home.sessionPath below.
+        profileExtra = lib.optionalString pkgs.stdenv.isDarwin ''
+          eval "$(/opt/homebrew/bin/brew shellenv)"
+        '';
         syntaxHighlighting.enable = true;
         autosuggestion.enable = true;
         history = {

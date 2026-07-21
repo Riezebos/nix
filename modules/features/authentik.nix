@@ -16,6 +16,7 @@
     secretKeyPath = "${secretDir}/secret-key";
     grafanaSecretDir = "/var/lib/grafana/secrets";
     grafanaClientSecretPath = "${grafanaSecretDir}/grafana-oidc-client-secret";
+    grafanaSecretKeyPath = "${grafanaSecretDir}/grafana-secret-key";
 
     prepareSecrets = pkgs.writeShellScript "authentik-prepare-secrets" ''
       set -euo pipefail
@@ -38,6 +39,17 @@
         printf '\n' >> ${grafanaClientSecretPath}
         chown grafana:grafana ${grafanaClientSecretPath}
         chmod 0400 ${grafanaClientSecretPath}
+      fi
+
+      # Grafana 26.05 dropped the built-in default for security.secret_key, so
+      # we mint a persistent per-host key here (same pattern as the OIDC client
+      # secret above). This DB stores no encrypted secrets today, so a fresh
+      # random key is safe.
+      if [ ! -s ${grafanaSecretKeyPath} ]; then
+        ${pkgs.openssl}/bin/openssl rand -base64 36 | tr -d '\n' > ${grafanaSecretKeyPath}
+        printf '\n' >> ${grafanaSecretKeyPath}
+        chown grafana:grafana ${grafanaSecretKeyPath}
+        chmod 0400 ${grafanaSecretKeyPath}
       fi
     '';
 
@@ -201,6 +213,7 @@
       security = {
         cookie_secure = true;
         hide_version = true;
+        secret_key = "$__file{${grafanaSecretKeyPath}}";
       };
 
       "auth.generic_oauth" = {

@@ -3,7 +3,7 @@
 
   inputs = {
     # Server (and anything else that wants stability)
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
 
     # Home Manager package pool (rolling, devenv-patched)
     nixpkgs-devenv.url = "github:cachix/devenv-nixpkgs/rolling";
