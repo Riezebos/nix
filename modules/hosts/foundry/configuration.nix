@@ -123,6 +123,14 @@
         KbdInteractiveAuthentication = false;
         MaxAuthTries = 3;
         AllowUsers = ["simon" "deploy" "foundryvtt-manager"];
+        # Reap dead sessions: CI deploys hold long ssh-ng sessions from
+        # GitHub runners, and a NAT drop mid-deploy (2026-07-21, twice) left
+        # sshd retransmitting into the void while nix-daemon kept the session
+        # slot. Probe every 30s, give up after 4 unanswered probes (~2 min).
+        # Only unresponsive clients are killed — idle-but-alive sessions
+        # answer the probe and stay up.
+        ClientAliveInterval = 30;
+        ClientAliveCountMax = 4;
       };
     };
 

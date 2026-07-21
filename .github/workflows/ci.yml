@@ -118,12 +118,29 @@ jobs:
       # `FOUNDRY_KNOWN_HOSTS` = output of
       #   ssh-keyscan -t ed25519 -p 62222 <foundry-ip>
       # run once from a trusted machine.
-      - name: Pin host key
+      #
+      # The ssh_config block applies keepalives to EVERY ssh process spawned
+      # on this runner, including the connections nix pools for the
+      # ssh-ng:// store. deploy-rs passes ServerAlive* via NIX_SSHOPTS, but
+      # nix opens its first remote-store connection early and lets it sit
+      # idle for the whole local evaluation (~20 min); the runner's NAT
+      # dropped that idle mapping twice on 2026-07-21 and the later build
+      # request went down the dead socket — a read that never returns.
+      # Keepalives every 15s both hold the NAT mapping open and turn a dead
+      # peer into a hard error within ~60s instead of a silent hang.
+      - name: Pin host key and harden ssh
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           printf '%s\n' "${{ secrets.FOUNDRY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'EOF'
+          Host *
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            TCPKeepAlive yes
+          EOF
+          chmod 600 ~/.ssh/config
 
       # `--hostname` overrides the placeholder in modules/deploy.nix so
       # the real IP never lands in this public repo. `--skip-checks`
@@ -134,9 +151,23 @@ jobs:
         # A wedged ssh/nix-daemon session or a unit that never finishes
         # activating would otherwise hang here until GitHub's 6h default.
         # A full remoteBuild deploy is minutes, so 45 is generous.
+        #
+        # Two bounded attempts, 20 min each: deploy-rs is safe to re-run
+        # (magic-rollback cleans up a failed activation, and store-level
+        # build/copy progress persists on foundry), so a transient network
+        # failure costs one retry instead of the whole deploy. `timeout`
+        # converts any residual hang into a fast failure well inside the
+        # job-level limit.
         timeout-minutes: 45
         run: |
-          nix run .#deploy-rs -- \
-            --skip-checks \
-            --hostname "${{ secrets.FOUNDRY_HOST }}" \
-            .#foundry
+          for attempt in 1 2; do
+            if timeout 20m nix run .#deploy-rs -- \
+              --skip-checks \
+              --hostname "${{ secrets.FOUNDRY_HOST }}" \
+              .#foundry; then
+              exit 0
+            fi
+            echo "::warning::deploy attempt ${attempt} failed (exit $?)"
+            [ "$attempt" = 1 ] && sleep 30
+          done
+          exit 1

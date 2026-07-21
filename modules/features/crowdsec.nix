@@ -76,6 +76,13 @@
         };
 
         lapi.credentialsFile = "/var/lib/crowdsec/local_api_credentials.yaml";
+
+        # Registering with the Central API pulls the community blocklist and
+        # (upstream default) shares our attack signals back. The setup script
+        # runs `cscli capi register` on first start — when this file doesn't
+        # hold credentials yet — and writes them here; /var/lib/crowdsec is
+        # owned by the crowdsec user the setup runs as.
+        capi.credentialsFile = "/var/lib/crowdsec/online_api_credentials.yaml";
       };
 
       localConfig = {
