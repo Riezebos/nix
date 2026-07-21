@@ -866,10 +866,10 @@
         if [ "$has_data_source_table" != "1" ]; then
           exit 0
         fi
-        ${pkgs.sqlite}/bin/sqlite3 ${grafanaDbPath} '
-          update data_source set uid = "victoriametrics" where name = "VictoriaMetrics";
-          update data_source set uid = "loki" where name = "Loki";
-        '
+        ${pkgs.sqlite}/bin/sqlite3 ${grafanaDbPath} "
+          update data_source set uid = 'victoriametrics' where name = 'VictoriaMetrics';
+          update data_source set uid = 'loki' where name = 'Loki';
+        "
       '';
     };
 

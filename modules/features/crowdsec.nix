@@ -1,5 +1,6 @@
 {...}: {
   flake.nixosModules.crowdsec = {
+    config,
     lib,
     pkgs,
     ...
@@ -24,6 +25,17 @@
       echo "crowdsec LAPI on 127.0.0.1:8080 not reachable after 60s" >&2
       exit 1
     '';
+
+    # Same rendering the nixpkgs module uses internally for the config file it
+    # passes to `crowdsec -c`. Rebuilt here (identical name + inputs, so the
+    # same store path) because the module keeps its copy in a `let` and the
+    # crowdsec-firewall-bouncer-register oneshot calls the *unwrapped* cscli,
+    # which only looks at /etc/crowdsec/config.yaml. Without this link the
+    # register unit fails on every activation.
+    settingsFormat = pkgs.formats.yaml {};
+    crowdsecConfigFile =
+      settingsFormat.generate "crowdsec.yaml"
+      config.services.crowdsec.settings.general;
   in {
     # The firewall bouncer uses nftables mode. Flip the host firewall backend
     # once here so the allow-list remains declarative.
@@ -31,12 +43,30 @@
 
     services.crowdsec = {
       enable = true;
-      autoUpdateService = true;
 
-      hub.collections = [
-        "crowdsecurity/sshd"
-        "crowdsecurity/caddy"
-      ];
+      # No autoUpdateService: `cscli hub update` already runs on every service
+      # start, and letting a nightly timer chase the hub's master branch is
+      # what broke us on 2026-05-31 — hub content drifted ahead of the pinned
+      # binary (a scenario started using the LookupFile expr helper that
+      # crowdsec < 1.7.5 doesn't have) and the agent crash-looped for seven
+      # weeks. The unit also never worked here: it runs with DynamicUser=true
+      # while our state dir is owned by the static crowdsec user.
+
+      hub = {
+        collections = [
+          "crowdsecurity/sshd"
+          "crowdsecurity/caddy"
+        ];
+
+        # Fetch hub content from the release branch that matches the pinned
+        # binary instead of the default `master`, so scenarios can never
+        # require expr helpers the binary doesn't ship. Tracks version bumps
+        # automatically. Upstream cuts the vX.Y.Z branch once that release is
+        # no longer the newest, which is always true for a stable-nixpkgs pin;
+        # if this ever 404s (pinned version is the latest release), crowdsec
+        # fails to start loudly at deploy time — fall back to "master" then.
+        branch = "v${config.services.crowdsec.package.version}";
+      };
 
       settings = {
         general.api.server = {
@@ -47,17 +77,37 @@
         lapi.credentialsFile = "/var/lib/crowdsec/local_api_credentials.yaml";
       };
 
-      localConfig.acquisitions = [
-        {
-          source = "journalctl";
-          journalctl_filter = ["_SYSTEMD_UNIT=sshd.service"];
-          labels.type = "syslog";
-        }
-        {
-          filenames = ["/var/log/caddy/access-*.log"];
-          labels.type = "caddy";
-        }
-      ];
+      localConfig = {
+        acquisitions = [
+          {
+            source = "journalctl";
+            journalctl_filter = ["_SYSTEMD_UNIT=sshd.service"];
+            labels.type = "syslog";
+          }
+          {
+            filenames = ["/var/log/caddy/access-*.log"];
+            labels.type = "caddy";
+          }
+        ];
+
+        # The module renders exactly this list as the LAPI's profiles file, and
+        # an empty list means alerts never become ban decisions — detection
+        # without remediation. This is upstream's stock default_ip_remediation
+        # profile.
+        profiles = [
+          {
+            name = "default_ip_remediation";
+            filters = [''Alert.Remediation == true && Alert.GetScope() == "Ip"''];
+            decisions = [
+              {
+                type = "ban";
+                duration = "4h";
+              }
+            ];
+            on_success = "break";
+          }
+        ];
+      };
     };
 
     services.crowdsec-firewall-bouncer = {
@@ -65,6 +115,9 @@
       registerBouncer.enable = true;
       settings.mode = "nftables";
     };
+
+    # See crowdsecConfigFile above.
+    environment.etc."crowdsec/config.yaml".source = crowdsecConfigFile;
 
     # Keep the CrowdSec engine user stable so group-based access to Caddy's
     # on-disk logs is predictable, and work around the current state-dir
@@ -75,9 +128,22 @@
       "caddy"
     ];
 
-    systemd.services.crowdsec.serviceConfig = {
-      DynamicUser = lib.mkForce false;
-      StateDirectory = lib.mkForce "crowdsec";
+    systemd.services.crowdsec = {
+      serviceConfig = {
+        DynamicUser = lib.mkForce false;
+        StateDirectory = lib.mkForce "crowdsec";
+      };
+
+      # Restart=always with no start limit means a persistently failing start
+      # (fatal config error, unreachable hub CDN) keeps the unit in
+      # "activating (auto-restart)" forever: it never reaches `failed`, so
+      # `systemctl --failed` and the healthchecks OnFailure hook both stay
+      # silent — that is how the 2026-05-31 crash loop went unnoticed for
+      # seven weeks. With RestartSec=60 this gives ~10 minutes of retries
+      # (enough to ride out DNS/network coming up at boot), then lands in
+      # `failed` where the alert fires.
+      startLimitIntervalSec = 3600;
+      startLimitBurst = 10;
     };
 
     # Gate the bouncer on the LAPI being reachable (see waitForLapi above).

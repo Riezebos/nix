@@ -110,6 +110,15 @@
       victoriametrics = "victoriametrics";
       alloy = "alloy";
       pgbouncer = "pgbouncer";
+      # Security and infrastructure units whose silent death cost us before:
+      # crowdsec crash-looped unnoticed for seven weeks (2026-05-31), and a
+      # dead dnsmasq takes out host DNS and with it deploys and hub updates.
+      # OnFailure only fires once a unit actually enters `failed`, so these
+      # rely on the start limits set in crowdsec.nix to convert crash loops
+      # into failed states.
+      crowdsec = "crowdsec";
+      "crowdsec-firewall-bouncer" = "crowdsec-firewall-bouncer";
+      dnsmasq = "dnsmasq";
     };
 
     onFailureHook = slug: {
