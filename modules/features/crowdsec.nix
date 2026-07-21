@@ -27,11 +27,12 @@
     '';
 
     # Same rendering the nixpkgs module uses internally for the config file it
-    # passes to `crowdsec -c`. Rebuilt here (identical name + inputs, so the
-    # same store path) because the module keeps its copy in a `let` and the
-    # crowdsec-firewall-bouncer-register oneshot calls the *unwrapped* cscli,
-    # which only looks at /etc/crowdsec/config.yaml. Without this link the
-    # register unit fails on every activation.
+    # passes to `crowdsec -c` (identical generator name + inputs, so the same
+    # store path). The module keeps its copy in a `let`, but the
+    # crowdsec-firewall-bouncer-register oneshot needs an explicit config
+    # path: upstream's script calls the *unwrapped* cscli, which only looks at
+    # /etc/crowdsec/config.yaml — a path its sandbox cannot see — so the unit
+    # failed on every activation.
     settingsFormat = pkgs.formats.yaml {};
     crowdsecConfigFile =
       settingsFormat.generate "crowdsec.yaml"
@@ -144,6 +145,47 @@
       # `failed` where the alert fires.
       startLimitIntervalSec = 3600;
       startLimitBurst = 10;
+    };
+
+    # Upstream's register oneshot is broken in two ways for our setup, so
+    # rebuild it on the same unit. First, it sets DynamicUser=true while also
+    # claiming StateDirectory=crowdsec — on first start systemd "migrates"
+    # /var/lib/crowdsec into /var/lib/private/, hijacking the static crowdsec
+    # user's state dir (seen in the 2026-07-21 deploy). Second, its script
+    # calls the unwrapped cscli, which reads /etc/crowdsec/config.yaml — a
+    # path the sandbox cannot see — so it exited 1 on every activation and,
+    # via the bouncer's Requires=, blocked the bouncer with it. Run it as the
+    # static crowdsec user, claim only its own state dir, and pass the
+    # rendered config's store path explicitly (store paths are visible in any
+    # sandbox).
+    systemd.services.crowdsec-firewall-bouncer-register = {
+      serviceConfig = {
+        DynamicUser = lib.mkForce false;
+        StateDirectory = lib.mkForce "crowdsec-firewall-bouncer-register";
+      };
+      script = let
+        cscli = "${lib.getExe' config.services.crowdsec.package "cscli"} -c ${crowdsecConfigFile}";
+        bouncerName =
+          config.services.crowdsec-firewall-bouncer.registerBouncer.bouncerName;
+        apiKeyFile = "/var/lib/crowdsec-firewall-bouncer-register/api-key.cred";
+      in
+        lib.mkForce ''
+          if ${cscli} bouncers list --output json \
+            | ${lib.getExe pkgs.jq} -e -- ${lib.escapeShellArg "any(.[]; .name == \"${bouncerName}\")"} >/dev/null; then
+            # Bouncer already registered; the API key must still exist because
+            # the bouncer unit loads it as a credential on every start.
+            if [ ! -f ${apiKeyFile} ]; then
+              echo "Bouncer registered but API key is not present" >&2
+              exit 1
+            fi
+          else
+            rm -f '${apiKeyFile}'
+            if ! ${cscli} bouncers add --output raw -- ${lib.escapeShellArg bouncerName} >${apiKeyFile}; then
+              rm -f ${apiKeyFile}
+              exit 1
+            fi
+          fi
+        '';
     };
 
     # Gate the bouncer on the LAPI being reachable (see waitForLapi above).
