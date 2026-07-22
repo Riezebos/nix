@@ -158,19 +158,27 @@ jobs:
         # observed runs, not hopes: the "Building profile" phase alone
         # (copying the drv closure to foundry, round-trip heavy) takes
         # 20-25 min on a cold runner, and a full deploy has taken 45+.
-        # 35 min per attempt; the job cap bounds the pair.
-        timeout-minutes: 75
+        #
+        # Asymmetric budgets. The first attempt gets 60 min — enough for a
+        # full cold deploy — because the retry only helps if attempt 1 was
+        # allowed to make real progress first. The second gets 25: whatever
+        # it copied and built is already in foundry's store, so a warm
+        # attempt has far less left to do, and capping it keeps a
+        # non-resumable hang from costing two full budgets.
+        timeout-minutes: 90
         run: |
-          for attempt in 1 2; do
+          attempt=0
+          for budget in 60m 25m; do
+            attempt=$((attempt + 1))
             rc=0
-            timeout 35m nix run .#deploy-rs -- \
+            timeout "${budget}" nix run .#deploy-rs -- \
               --skip-checks \
               --hostname "${{ secrets.FOUNDRY_HOST }}" \
               .#foundry || rc=$?
             if [ "$rc" = 0 ]; then
               exit 0
             fi
-            echo "::warning::deploy attempt ${attempt} failed (exit ${rc}; 124 means per-attempt timeout)"
-            [ "$attempt" = 1 ] && sleep 30
+            echo "::warning::deploy attempt ${attempt} (${budget} budget) failed (exit ${rc}; 124 means per-attempt timeout)"
+            if [ "$attempt" = 1 ]; then sleep 30; fi
           done
           exit 1
