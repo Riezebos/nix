@@ -150,24 +150,27 @@ jobs:
       - name: Deploy
         # A wedged ssh/nix-daemon session or a unit that never finishes
         # activating would otherwise hang here until GitHub's 6h default.
-        # A full remoteBuild deploy is minutes, so 45 is generous.
         #
-        # Two bounded attempts, 20 min each: deploy-rs is safe to re-run
-        # (magic-rollback cleans up a failed activation, and store-level
-        # build/copy progress persists on foundry), so a transient network
-        # failure costs one retry instead of the whole deploy. `timeout`
-        # converts any residual hang into a fast failure well inside the
-        # job-level limit.
-        timeout-minutes: 45
+        # Two bounded attempts: deploy-rs is safe to re-run (magic-rollback
+        # cleans up a failed activation, and store-level build/copy progress
+        # persists on foundry), so a transient network failure costs one
+        # retry instead of the whole deploy. Budgets are calibrated to
+        # observed runs, not hopes: the "Building profile" phase alone
+        # (copying the drv closure to foundry, round-trip heavy) takes
+        # 20-25 min on a cold runner, and a full deploy has taken 45+.
+        # 35 min per attempt; the job cap bounds the pair.
+        timeout-minutes: 75
         run: |
           for attempt in 1 2; do
-            if timeout 20m nix run .#deploy-rs -- \
+            rc=0
+            timeout 35m nix run .#deploy-rs -- \
               --skip-checks \
               --hostname "${{ secrets.FOUNDRY_HOST }}" \
-              .#foundry; then
+              .#foundry || rc=$?
+            if [ "$rc" = 0 ]; then
               exit 0
             fi
-            echo "::warning::deploy attempt ${attempt} failed (exit $?)"
+            echo "::warning::deploy attempt ${attempt} failed (exit ${rc}; 124 means per-attempt timeout)"
             [ "$attempt" = 1 ] && sleep 30
           done
           exit 1
