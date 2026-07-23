@@ -75,12 +75,10 @@
         # }
       '';
 
-      # agent-sandcastle launcher. Authentik's embedded proxy outpost gates
-      # access via forward_auth — the launcher itself has no built-in auth,
-      # so without this header pass-through any visitor could spawn
-      # sandboxes. The X-Authentik-* headers are copied through verbatim so
-      # the launcher can attribute actions to a real user once the M2 host
-      # adapter lands.
+      # agent-sandcastle launcher. Authentik forward_auth gates access, and the
+      # launcher independently requires the X-Authentik identity plus membership
+      # in sandbox-admins. The launcher is loopback-only so external clients
+      # cannot bypass Caddy and forge those trusted proxy headers.
       virtualHosts."sandcastle.simonito.com".extraConfig = ''
         encode zstd gzip
         ${mkAccessLog "sandcastle"}
