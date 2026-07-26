@@ -136,6 +136,47 @@ Expected:
 - `all.sql.zstd` is recent
 - the dump starts with roles and database DDL
 
+## Sandbox verification
+
+Development sandboxes are managed with the `sandcastle` CLI over SSH. There is
+no web UI; the Phoenix launcher on `sandcastle.simonito.com` is the retired
+path and is still deployed alongside it until the CLI passes this checklist.
+
+```bash
+ssh foundry sudo sandcastle list
+ssh foundry sudo sandcastle create scratch --packages node python
+ssh foundry sudo sandcastle start scratch
+ssh foundry sudo sandcastle status scratch
+ssh -t foundry sudo sandcastle ssh scratch
+ssh foundry sudo sandcastle logs scratch -n 50
+ssh foundry sudo sandcastle rebuild scratch
+ssh foundry sudo sandcastle stop scratch
+ssh foundry sudo sandcastle delete scratch --yes
+```
+
+Expected:
+
+- `create` reserves an address in `10.88.0.16`-`10.88.0.99`, builds a runner,
+  and leaves the sandbox stopped.
+- `start` returns only once the guest has held a running state for a few
+  seconds. `microvm@<name>.service` is `Type=simple` with `Restart=always`, so
+  a silent boot failure would otherwise look like success.
+- `sandcastle ssh` lands in the guest as `dev` over AF_VSOCK. No guest SSH
+  port is opened, so nothing new appears in the host firewall.
+- The guest TAP device is `sc-` plus a hash and is attached to
+  `br-sandboxes`: `ssh foundry ip link show master br-sandboxes`.
+- `rebuild` installs a new runner and rolls `current` back if the guest fails
+  to come up.
+- `delete` removes the disks and specification but keeps
+  `/var/lib/sandcastle/credentials/<name>` unless `--delete-credentials` is
+  passed.
+
+Sandbox egress currently still goes through the launcher-era nftables
+allowlist, so a sandbox reaches DNS and the allowlisted destinations only.
+General public-internet egress with private-range blocking is upstream M3.
+
+Sandbox disks are not backed up. Commit and push work from inside the sandbox.
+
 ## Robot SSH key sync
 
 Rescue mode authorizes the SSH key registered in Hetzner Robot at rescue
