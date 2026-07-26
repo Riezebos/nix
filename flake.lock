@@ -7,11 +7,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1785066559,
-        "narHash": "sha256-zO6kqnJbELr7Iy38WTKeSkd7vYnLYup0p5GZ1h8wmwE=",
+        "lastModified": 1785077841,
+        "narHash": "sha256-VsY0lWNbYjJzyYs3Ed7uY5wnZoWmvTqKxbuVJAlWtAg=",
         "owner": "Riezebos",
         "repo": "agent-sandcastle.nix",
-        "rev": "8254587962c0931bc4a01532e455c9d89b053c5f",
+        "rev": "a17d4c26f98492f2a4760c89129be31a0ca81855",
         "type": "github"
       },
       "original": {
