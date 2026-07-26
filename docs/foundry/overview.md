@@ -62,6 +62,14 @@ ssh -p 2222 root@foundry
 | PostgreSQL | Shared application database | Local service |
 | restic | Backups to Hetzner Storage Box | Outbound only |
 | Healthchecks.io pings | Failure/dead-man alerts | Outbound only |
+| agent-sandcastle launcher | Retired sandbox web UI | Public vhost behind Authentik |
+| sandcastle CLI | Development MicroVM sandboxes | SSH only, no listening port |
+
+The two agent-sandcastle entries are deliberately both present: the CLI is the
+replacement and the launcher is removed only once the CLI has passed the
+sandbox checklist in [`operations.md`](operations.md). Sandbox guests run under
+`microvm@<name>.service` with state in `/var/lib/sandcastle`, reachable from
+the host over AF_VSOCK rather than through a forwarded port.
 
 `foundry` is built from `modules/hosts/foundry/configuration.nix`, which imports
 the feature modules in `modules/features/`.
