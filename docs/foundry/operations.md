@@ -73,11 +73,10 @@ Then update `majorVersion` / `build` in `modules/features/foundryvtt.nix` and
 merge. If the zip is missing, the deploy fails on foundry at build time,
 before any activation.
 
-Do not try to move this build to the runner. That was measured on
-2026-08-04 and is far slower: `sandboxStore` pulls a whole microVM system
-and its agent CLIs into the closure, so a cold runner has to compile codex
-(~980 Rust crates), claude-code, the Elixir launcher and the microVM from
-source. See the comment in `modules/deploy.nix` and
+Do not move this build to the runner without re-measuring it and solving the
+licensed installer input. The 2026-08-04 runner-side measurements predate the
+removal of the launcher and curated sandbox store, so they no longer represent
+the current closure. See the comment in `modules/deploy.nix` and
 `.github/workflows/diagnose-deploy-build.yml`.
 
 ## Local verification
@@ -165,8 +164,7 @@ Expected:
 ## Sandbox verification
 
 Development sandboxes are managed with the `sandcastle` CLI over SSH. There is
-no web UI; the Phoenix launcher on `sandcastle.simonito.com` is the retired
-path and is still deployed alongside it until the CLI passes this checklist.
+no web UI; the retired Phoenix launcher is no longer deployed.
 
 ```bash
 ssh foundry sudo sandcastle list

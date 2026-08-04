@@ -61,18 +61,14 @@ in {
       # min per deploy and is immune to a warm store on foundry.
       #
       # `remoteBuild = false` was tried on 2026-08-04 and is worse. The
-      # runner cannot substitute this system's closure: `sandboxStore`
-      # pulls a complete microVM NixOS system (`nixos-system-sandcastle-
-      # smoke`) and its agent CLIs into the closure, and none of it is in
-      # cache.nixos.org. A cold runner therefore has to compile codex
-      # (~980 Rust crates), claude-code, the Elixir launcher release and
-      # the whole microVM from source. Two attempts of 45 and 30 min both
-      # expired without finishing; a diagnostic run confirmed steady
-      # progress rather than a hang, just far more work than fits in any
-      # sane CI budget on 4 cores.
+      # runner could not substitute enough of the system closure, and two
+      # attempts of 45 and 30 min expired without finishing. The retired
+      # launcher and curated sandbox store made that measurement especially
+      # expensive, so it should be re-measured before using it as a current
+      # performance comparison.
       #
-      # Foundry has all of that warm from previous deploys, which is why
-      # its own `nixos-rebuild` finishes in minutes. Keep the build there.
+      # Foundry has most inputs warm from previous deploys, which is why its
+      # own `nixos-rebuild` finishes in minutes. Keep the build there.
       # (See .github/workflows/diagnose-deploy-build.yml to re-measure.)
       #
       # A secondary reason it must stay true: FoundryVTT's installer zip is

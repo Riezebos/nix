@@ -38,12 +38,9 @@
     foundryvtt.url = "github:reckenrode/nix-foundryvtt";
     foundryvtt.inputs.nixpkgs.follows = "nixpkgs";
 
-    # agent-sandcastle.nix provides the Phoenix LiveView launcher used by
-    # sandcastle.simonito.com. Its launcher package is built against the
-    # upstream `nixos-unstable` BEAM/Phoenix toolchain that the release was
-    # tested with — do NOT `inputs.nixpkgs.follows = "nixpkgs"` here; pinning
-    # it onto our stable channel risks breaking the release build for marginal
-    # closure dedup. Keep its nixpkgs independent in flake.lock.
+    # agent-sandcastle.nix provides the CLI host and MicroVM sandbox runner.
+    # Keep its nixpkgs independent in flake.lock so runners are built from the
+    # exact upstream inputs the CLI host was tested with.
     agent-sandcastle.url = "github:Riezebos/agent-sandcastle.nix";
   };
 
