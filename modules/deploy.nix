@@ -53,32 +53,32 @@ in {
       # ~/.ssh/config (see docs/foundry/operations.md).
       hostname = "foundry";
 
-      # Build on the deploying machine, not on foundry.
+      # Build on foundry, not on the deploying machine.
       #
-      # `remoteBuild = true` was hugely expensive: deploy-rs's remote path
-      # (deploy-rs src/push.rs) first runs
-      #   nix copy -s --to ssh-ng://… --derivation <drv>
-      # which ships the *entire derivation closure* — ~6600 .drv files — over
-      # a round-trip-bound ssh-ng connection. Measured 32-45 min per deploy,
-      # and a warm store on foundry does not help, because the drvs are
-      # shipped regardless. Building the same toplevel directly on foundry
-      # takes ~2 min, so essentially all of that was protocol overhead.
+      # This is expensive and we have measured the alternative. deploy-rs's
+      # remote path first ships the entire derivation closure (~6600 .drv
+      # files) over a round-trip-bound ssh-ng connection, which costs 32-45
+      # min per deploy and is immune to a warm store on foundry.
       #
-      # The only reason it was ever on: FoundryVTT's installer zip is a
-      # personal-license file that exists solely in foundry's store, so a
-      # GitHub runner cannot build the `requireFile` input. The CI workflow
-      # now sidesteps that by copying the four already-built foundryvtt
-      # outputs *from* foundry before deploying (see the "Seed FoundryVTT"
-      # step in .github/workflows/ci.yml), so the runner never needs the zip
-      # and never rebuilds the package.
+      # `remoteBuild = false` was tried on 2026-08-04 and is worse. The
+      # runner cannot substitute this system's closure: `sandboxStore`
+      # pulls a complete microVM NixOS system (`nixos-system-sandcastle-
+      # smoke`) and its agent CLIs into the closure, and none of it is in
+      # cache.nixos.org. A cold runner therefore has to compile codex
+      # (~980 Rust crates), claude-code, the Elixir launcher release and
+      # the whole microVM from source. Two attempts of 45 and 30 min both
+      # expired without finishing; a diagnostic run confirmed steady
+      # progress rather than a hang, just far more work than fits in any
+      # sane CI budget on 4 cores.
       #
-      # With this false, deploy-rs instead copies the built profile with
-      # `--substitute-on-destination`, so foundry pulls the bulk of the
-      # closure straight from cache.nixos.org at ~88 MB/s and only
-      # runner-built paths are pushed over ssh. `--no-check-sigs` is passed
-      # by default and `deploy` is in `trusted-users` (wheel), so unsigned
-      # runner-built paths are accepted.
-      remoteBuild = false;
+      # Foundry has all of that warm from previous deploys, which is why
+      # its own `nixos-rebuild` finishes in minutes. Keep the build there.
+      # (See .github/workflows/diagnose-deploy-build.yml to re-measure.)
+      #
+      # A secondary reason it must stay true: FoundryVTT's installer zip is
+      # a personal-license file that exists only in foundry's store, so the
+      # `requireFile` input is unbuildable anywhere else.
+      remoteBuild = true;
 
       profiles.system = {
         path = deployPkgs.activate.nixos self.nixosConfigurations.foundry;

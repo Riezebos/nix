@@ -96,41 +96,15 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
         with:
-          # `trusted-users` is required by the "Seed FoundryVTT" step below.
-          # `nix copy --no-check-sigs` is silently ineffective for an
-          # untrusted client — nix refuses the path with "lacks a signature
-          # by a trusted key" regardless of the flag (verified locally). The
-          # installer probably grants the runner user trust already, but it
-          # is not a documented input, so pin it here: this lands in
-          # /etc/nix/nix.conf, which is authoritative, and is a harmless
-          # no-op if redundant. `runner` is the user on ubuntu-latest.
           extra-conf: |
             accept-flake-config = true
-            trusted-users = root runner
 
-      # `skipPush: true` is a licensing guard, not an optimisation.
-      #
-      # `riezebos` is a PUBLIC cache. Since `remoteBuild = false`, this job
-      # now realises the whole system toplevel on the runner — and that
-      # closure contains the FoundryVTT outputs, which are per-seat licensed
-      # commercial software. Pushing them here would publish ~468 MiB of
-      # licensed software world-readable.
-      #
-      # `pushFilter` is NOT sufficient for this: cachix documents that
-      # filtered paths are still pushed when they are part of another path's
-      # closure, which is exactly the situation here. Only skipPush is a
-      # real guarantee. The cache is still *pulled* from, which is all this
-      # job needs it for.
-      #
-      # The build job above has no ssh access to foundry and only evaluates,
-      # so it never holds the licensed paths and still pushes normally.
       - name: Setup Cachix
         if: ${{ vars.CACHIX_CACHE_NAME != '' }}
         uses: cachix/cachix-action@f495f3ffa2f3810a92e5cc0abc2c5d6a2a07ec82 # v17
         with:
           name: ${{ vars.CACHIX_CACHE_NAME }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: true
 
       # Load the deploy user's private key into ssh-agent. Matching
       # pubkey lives in modules/hosts/foundry/configuration.nix under
@@ -168,41 +142,6 @@ jobs:
           EOF
           chmod 600 ~/.ssh/config
 
-      # Copy the already-built FoundryVTT outputs *from* foundry.
-      #
-      # FoundryVTT's installer zip is a personal-license file that lives only
-      # in foundry's store, so the runner cannot build the `requireFile`
-      # input. Rather than ship the zip to CI (licensing) or build the
-      # package here (an npm build plus `brotli -9`/`zstd -19` over the whole
-      # static tree — slow on a 2-core runner), we pull the four finished
-      # outputs over the ssh connection we already have. The licensed bits
-      # never leave your own machines.
-      #
-      # This is what makes `remoteBuild = false` possible; see the comment in
-      # modules/deploy.nix. Evaluating the package is fine without the zip —
-      # `requireFile` only fails at build time — so the output paths can be
-      # computed here and fetched by path.
-      #
-      # `--no-check-sigs` because foundry does not sign its store paths; the
-      # source is an authenticated ssh connection to a host we pin the key of.
-      #
-      # If this step fails with "path does not exist", foundry has not built
-      # the pinned FoundryVTT version yet. See the FoundryVTT upgrade section
-      # in docs/foundry/operations.md — the zip must be seeded and the
-      # package built on foundry *before* CI can deploy a version bump.
-      - name: Seed FoundryVTT from foundry
-        run: |
-          set -euo pipefail
-          paths=$(nix eval --raw \
-            --apply 'p: builtins.concatStringsSep " " (map (o: p.${o}.outPath) p.outputs)' \
-            .#nixosConfigurations.foundry.config.services.foundryvtt.package)
-          echo "Fetching from foundry:"
-          for p in $paths; do echo "  $p"; done
-          NIX_SSHOPTS="-o Port=62222 -o StrictHostKeyChecking=accept-new" \
-            nix copy --no-check-sigs \
-              --from "ssh-ng://deploy@${{ secrets.FOUNDRY_HOST }}" \
-              $paths
-
       # `--hostname` overrides the placeholder in modules/deploy.nix so
       # the real IP never lands in this public repo. `--skip-checks`
       # because the build job above already built the deploy-rs
@@ -217,27 +156,16 @@ jobs:
         # persists on foundry), so a transient network failure costs one
         # retry instead of the whole deploy.
         #
-        # Budgets are PROVISIONAL — re-tune once a few runs land.
-        #
-        # History: under `remoteBuild = true` the dominant cost was
-        # `nix copy --derivation` shipping ~6600 drvs over ssh-ng, measured
-        # at 32-45 min and immune to a warm store. The old 60m/25m pair was
-        # miscalibrated to the point that the 25 min second attempt sat below
-        # the observed cost of that phase alone, so from cold it could never
-        # succeed — on 2026-08-03 both attempts expired without foundry
-        # building a single derivation.
-        #
-        # That phase is now gone (see modules/deploy.nix). deploy-rs builds
-        # locally and copies the profile with `--substitute-on-destination`,
-        # so foundry pulls the bulk from cache.nixos.org itself and only
-        # runner-built paths (~670 small unit files and symlink farms) go
-        # over ssh. Expect roughly 5-15 min. 45m/30m is therefore generous
-        # headroom rather than a measured figure; tighten it once real
-        # timings exist.
-        timeout-minutes: 90
+        # Budgets sized to the measured remoteBuild cost. The dominant
+        # phase is `nix copy --derivation` shipping ~6600 drvs over ssh-ng:
+        # 32 min on 2026-08-03, 44 min on the re-run, and a warm store on
+        # foundry does not reduce it. The old 60m/25m pair put the second
+        # attempt below the cost of that phase alone, so from cold it could
+        # never succeed. 90m/60m clears a full cold deploy twice.
+        timeout-minutes: 165
         run: |
           attempt=0
-          for budget in 45m 30m; do
+          for budget in 90m 60m; do
             attempt=$((attempt + 1))
             rc=0
             # `--debug-logs` is what makes a stall diagnosable. Without it
