@@ -54,6 +54,51 @@ nix run nixpkgs#nixos-rebuild -- switch \
 Use the fallback for emergencies, CI outages, or deliberate local activation.
 It does not have deploy-rs magic rollback.
 
+## FoundryVTT upgrades
+
+Read this before bumping the pinned FoundryVTT build in
+`modules/features/foundryvtt.nix`. CI now depends on foundry having the
+package already built.
+
+Deploys build on the GitHub runner (`remoteBuild = false` in
+`modules/deploy.nix`). The runner cannot build FoundryVTT: the installer zip
+is a personal-license file and only exists in foundry's store, so the
+`requireFile` input is unbuildable anywhere else. Instead the "Seed
+FoundryVTT from foundry" step in `.github/workflows/ci.yml` copies the four
+already-built outputs (`out gzip zstd brotli`) *from* foundry. The licensed
+artifact never leaves your own machines, and is deliberately kept out of the
+public `riezebos` Cachix cache — the deploy job runs with `skipPush: true`
+for exactly this reason.
+
+The consequence is an ordering requirement. Foundry must have built the new
+version *before* CI can deploy it, so bump in this order:
+
+1. Download the new `FoundryVTT-Linux-<version>.zip` from your Foundry
+   account and seed it into foundry's store:
+
+   ```bash
+   scp FoundryVTT-Linux-<version>.zip foundry:/tmp/
+   ssh foundry sudo nix-store --add-fixed sha256 /tmp/FoundryVTT-Linux-<version>.zip
+   ssh foundry rm /tmp/FoundryVTT-Linux-<version>.zip
+   ```
+
+2. Update `majorVersion` / `build` in `modules/features/foundryvtt.nix` and
+   commit on a branch (do not merge yet).
+
+3. Build the package on foundry so the outputs exist there:
+
+   ```bash
+   ssh foundry sudo nix build --no-link \
+     'github:Riezebos/nix/<your-branch>#nixosConfigurations.foundry.config.services.foundryvtt.package'
+   ```
+
+4. Merge to `main`. CI's seed step will now find the outputs and the deploy
+   proceeds normally.
+
+If you skip step 3, the deploy fails at "Seed FoundryVTT from foundry" with
+a missing-path error rather than anything more confusing. That failure is
+safe — it happens before any activation.
+
 ## Local verification
 
 Basic service checks:

@@ -53,10 +53,32 @@ in {
       # ~/.ssh/config (see docs/foundry/operations.md).
       hostname = "foundry";
 
-      # FoundryVTT's installer zip is a personal-license file and is seeded
-      # into the target host's Nix store, not GitHub Actions. Build the system
-      # profile on foundry so deploys can use that local requireFile input.
-      remoteBuild = true;
+      # Build on the deploying machine, not on foundry.
+      #
+      # `remoteBuild = true` was hugely expensive: deploy-rs's remote path
+      # (deploy-rs src/push.rs) first runs
+      #   nix copy -s --to ssh-ng://… --derivation <drv>
+      # which ships the *entire derivation closure* — ~6600 .drv files — over
+      # a round-trip-bound ssh-ng connection. Measured 32-45 min per deploy,
+      # and a warm store on foundry does not help, because the drvs are
+      # shipped regardless. Building the same toplevel directly on foundry
+      # takes ~2 min, so essentially all of that was protocol overhead.
+      #
+      # The only reason it was ever on: FoundryVTT's installer zip is a
+      # personal-license file that exists solely in foundry's store, so a
+      # GitHub runner cannot build the `requireFile` input. The CI workflow
+      # now sidesteps that by copying the four already-built foundryvtt
+      # outputs *from* foundry before deploying (see the "Seed FoundryVTT"
+      # step in .github/workflows/ci.yml), so the runner never needs the zip
+      # and never rebuilds the package.
+      #
+      # With this false, deploy-rs instead copies the built profile with
+      # `--substitute-on-destination`, so foundry pulls the bulk of the
+      # closure straight from cache.nixos.org at ~88 MB/s and only
+      # runner-built paths are pushed over ssh. `--no-check-sigs` is passed
+      # by default and `deploy` is in `trusted-users` (wheel), so unsigned
+      # runner-built paths are accepted.
+      remoteBuild = false;
 
       profiles.system = {
         path = deployPkgs.activate.nixos self.nixosConfigurations.foundry;
