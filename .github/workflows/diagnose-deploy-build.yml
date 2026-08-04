@@ -1,0 +1,130 @@
+# Diagnostic-only workflow. Not part of CI; run it by hand from the Actions
+# tab when you need to know what the runner-side build is actually doing.
+#
+# Background: on 2026-08-04 the deploy job, with `remoteBuild = false`, ran
+#   nix build /nix/store/7isyqnskiz…-activatable-nixos-system-foundry.drv^out \
+#     --no-link --print-build-logs
+# and produced ZERO lines of output across 44 min, then another 30 min on
+# retry. deploy-rs inherits stderr in its --debug-logs path, so that silence
+# was real: nix fetched nothing and built nothing that it was willing to
+# mention. Disk exhaustion, OOM, the cachix post-build-hook and untrusted
+# nix users have all been ruled out. This workflow exists to find out what
+# it was doing instead.
+#
+# It reproduces exactly that build (verified: the flake attr below has the
+# same drvPath) and wraps it in a sampler, so even if nix stays silent we
+# learn whether the process is burning CPU, blocked in IO, talking to the
+# network, or quietly adding store paths.
+name: diagnose-deploy-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      verbosity:
+        description: "nix verbosity flag (-v, -vv, -vvv). -vvv logs every substituter query but is very noisy."
+        required: false
+        default: "-vv"
+      budget:
+        description: "How long to let the build run before killing it and dumping a post-mortem."
+        required: false
+        default: "45m"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    # Generous: the point is to observe, not to finish.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Mirror the deploy job's environment exactly, or the repro is worthless.
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        with:
+          extra-conf: |
+            accept-flake-config = true
+            trusted-users = root runner
+
+      - name: Setup Cachix
+        if: ${{ vars.CACHIX_CACHE_NAME != '' }}
+        uses: cachix/cachix-action@f495f3ffa2f3810a92e5cc0abc2c5d6a2a07ec82 # v17
+        with:
+          name: ${{ vars.CACHIX_CACHE_NAME }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: true
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.FOUNDRY_DEPLOY_KEY }}
+
+      - name: Pin host key
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.FOUNDRY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      # Without this the build dies on FoundryVTT's requireFile instead of
+      # reproducing the hang we care about.
+      - name: Seed FoundryVTT from foundry
+        run: |
+          set -euo pipefail
+          paths=$(nix eval --raw \
+            --apply 'p: builtins.concatStringsSep " " (map (o: p.${o}.outPath) p.outputs)' \
+            .#nixosConfigurations.foundry.config.services.foundryvtt.package)
+          NIX_SSHOPTS="-o Port=62222 -o StrictHostKeyChecking=accept-new" \
+            nix copy --no-check-sigs \
+              --from "ssh-ng://deploy@${{ secrets.FOUNDRY_HOST }}" \
+              $paths
+
+      - name: Baseline
+        run: |
+          echo "=== disk ==="; df -h / /nix 2>/dev/null || df -h /
+          echo "=== cpu/mem ==="; nproc; free -h
+          echo "=== substituters nix will actually use ==="
+          nix config show 2>/dev/null | grep -iE "^substituters|^trusted-substituters|^require-sigs|^max-jobs|^cores|^post-build-hook" || true
+          echo "=== store paths at start ==="; ls /nix/store | wc -l
+          echo "=== target drv (should match the one deploy-rs built) ==="
+          nix eval --raw .#deploy.nodes.foundry.profiles.system.path.drvPath
+
+      - name: Build with sampler
+        run: |
+          set -uo pipefail
+
+          # Sampler: every 20s, say what the nix processes are doing. `stat`
+          # and `wchan` are the useful columns — R means CPU-bound, D means
+          # blocked in uninterruptible IO, S with a socket wchan means it is
+          # waiting on the network. The store-path count shows whether it is
+          # making silent progress.
+          (
+            start=$(date +%s)
+            while true; do
+              now=$(date +%s)
+              printf '\n──── +%ss ── paths=%s ── conns=%s ── free=%s\n' \
+                "$(( now - start ))" \
+                "$(ls /nix/store | wc -l)" \
+                "$(ss -tn state established 2>/dev/null | wc -l)" \
+                "$(df -h --output=avail / | tail -1 | tr -d ' ')"
+              ps -eo pid,stat,pcpu,pmem,etime,wchan:20,args --sort=-pcpu \
+                | grep -E "nix|curl|xz|zstd|bash .*builder" | grep -v grep | head -8
+              sleep 20
+            done
+          ) &
+          sampler=$!
+          trap 'kill $sampler 2>/dev/null || true' EXIT
+
+          echo "Running the same build deploy-rs runs, with ${{ inputs.verbosity }}"
+          set -x
+          timeout "${{ inputs.budget }}" \
+            nix build .#deploy.nodes.foundry.profiles.system.path \
+              --no-link --print-build-logs ${{ inputs.verbosity }} || rc=$?
+          set +x
+          echo "build exited rc=${rc:-0} (124 = hit the budget)"
+
+          kill $sampler 2>/dev/null || true
+
+          echo "=== POST-MORTEM ==="
+          echo "--- store paths at end ---"; ls /nix/store | wc -l
+          echo "--- disk ---"; df -h /
+          echo "--- what is still missing for this build ---"
+          nix build .#deploy.nodes.foundry.profiles.system.path --dry-run 2>&1 | tail -20
