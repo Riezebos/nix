@@ -332,7 +332,7 @@
           client_login_timeout = 15;
           idle_transaction_timeout = 300;
           query_timeout = 120;
-          ignore_startup_parameters = "extra_float_digits";
+          ignore_startup_parameters = "extra_float_digits,ssl_renegotiation_limit";
 
           auth_type = "scram-sha-256";
           auth_file = config.sops.secrets."deliverable/pgbouncer_auth".path;
