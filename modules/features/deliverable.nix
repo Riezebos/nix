@@ -317,21 +317,32 @@
       enable = true;
       openFirewall = true;
       settings = {
-        databases.${database} = "host=/run/postgresql port=5432 dbname=${database} pool_size=10 max_db_connections=20";
+        databases.${database} = "host=/run/postgresql port=5432 dbname=${database} pool_size=24 max_db_connections=70";
 
         pgbouncer = {
           listen_addr = "*";
           listen_port = pgbouncerPort;
+          # Power BI/Npgsql keeps session state and opens up to ten parallel
+          # DirectQuery connections per data source. Keep session pooling for
+          # compatibility, but leave enough backend capacity for several
+          # trainees refreshing reports at the same time.
           pool_mode = "session";
-          max_client_conn = 80;
-          default_pool_size = 10;
-          max_db_connections = 20;
-          max_user_connections = 20;
-          reserve_pool_size = 2;
+          max_client_conn = 100;
+          default_pool_size = 24;
+          max_db_connections = 70;
+          max_user_connections = 30;
+          reserve_pool_size = 6;
           reserve_pool_timeout = 5;
+          server_idle_timeout = 60;
           client_login_timeout = 15;
           idle_transaction_timeout = 300;
-          query_timeout = 120;
+          # Power BI's PostgreSQL connector has its own command timeout (ten
+          # minutes by default). PgBouncer's query timeouts are documented as
+          # dangerous and surface in Npgsql only as "Exception while reading
+          # from stream", so let the client own both execution and pool-wait
+          # cancellation.
+          query_timeout = 0;
+          query_wait_timeout = 0;
           ignore_startup_parameters = "extra_float_digits,ssl_renegotiation_limit";
 
           auth_type = "scram-sha-256";
