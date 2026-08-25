@@ -342,7 +342,7 @@
         };
         # ~/.profile is hand-managed with some env vars
         initContent = lib.mkMerge [
-          (lib.mkBefore (lib.optionalString pkgs.stdenv.isDarwin ''
+          (lib.mkBefore (lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             eval "$(/opt/homebrew/bin/brew shellenv)"
           ''))
           (lib.mkBefore ''
@@ -367,7 +367,7 @@
                 fi
             }
 
-            ${lib.optionalString pkgs.stdenv.isDarwin ''
+            ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               # Foundry (Hetzner) LUKS unlock helpers.
               # Seed the macOS Keychain once:
               #     foundry-unlock-seed
@@ -495,7 +495,7 @@
                     "$@"
             }
 
-            ${lib.optionalString pkgs.stdenv.isDarwin ''
+            ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
               foundry-unlock-seed() {
                   print "Storing LUKS passphrase for foundry in the login keychain."
                   print "(Input is hidden; you will be prompted once.)"
