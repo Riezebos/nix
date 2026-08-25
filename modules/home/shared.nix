@@ -340,13 +340,14 @@
           ignoreAllDups = true;
           ignoreSpace = false;
         };
-        # Keep brew shellenv (PATH, MANPATH, INFOPATH, HOMEBREW_*) in the shell
-        # via .zshrc rather than .zprofile, so Home Manager doesn't need to
-        # generate ~/.zprofile
+        # ~/.profile is hand-managed with some env vars
         initContent = lib.mkMerge [
           (lib.mkBefore (lib.optionalString pkgs.stdenv.isDarwin ''
             eval "$(/opt/homebrew/bin/brew shellenv)"
           ''))
+          (lib.mkBefore ''
+            [ -r "$HOME/.profile" ] && . "$HOME/.profile"
+          '')
           (lib.mkAfter ''
             _zsh_autosuggest_strategy_atuin_auto() {
                 suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
