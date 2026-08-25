@@ -332,13 +332,6 @@
       zsh = {
         enable = true;
         autocd = true;
-        # Home Manager owns ~/.zprofile; Homebrew's own installer normally
-        # appends `brew shellenv` there. Keep it (PATH, MANPATH, INFOPATH,
-        # HOMEBREW_*) so brew-installed tools stay on PATH in login shells.
-        # `~/.local/bin` (pipx) is covered by home.sessionPath below.
-        profileExtra = lib.optionalString pkgs.stdenv.isDarwin ''
-          eval "$(/opt/homebrew/bin/brew shellenv)"
-        '';
         syntaxHighlighting.enable = true;
         autosuggestion.enable = true;
         history = {
@@ -347,171 +340,179 @@
           ignoreAllDups = true;
           ignoreSpace = false;
         };
-        initContent = lib.mkAfter ''
-          _zsh_autosuggest_strategy_atuin_auto() {
-              suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
-          }
-
-          _zsh_autosuggest_strategy_atuin_global() {
-              suggestion=$(atuin search --cmd-only --limit 1 --search-mode prefix -- "$1")
-          }
-          export ZSH_AUTOSUGGEST_STRATEGY=(atuin_auto atuin_global)
-
-          pip() {
-              if ! type -P pip &> /dev/null
-              then
-                  uv pip "$@"
-              else
-                  command pip "$@"
-              fi
-          }
-
-          ${lib.optionalString pkgs.stdenv.isDarwin ''
-            # Foundry (Hetzner) LUKS unlock helpers.
-            # Seed the macOS Keychain once:
-            #     foundry-unlock-seed
-            # Then, after a reboot, unlock the server in one step:
-            #     foundry-unlock
-            #
-            # Requires a `Host foundry` entry in ~/.ssh/config — the IP is looked
-            # up via `ssh -G` so it never appears in this (public) repo.
-            #
-            # The initrd sshd uses `ForceCommand systemd-tty-ask-password-agent --query`,
-            # which reads the passphrase from /dev/tty. `ssh -tt` forces pty allocation
-            # so the piped stdin is fed into the pty that the agent reads from.
-            foundry-unlock() {
-                emulate -L zsh
-                local ssh_host=foundry
-                # Keep in sync with services.openssh.ports in
-                # modules/hosts/foundry/configuration.nix. The main sshd lives
-                # on a non-standard port so the production system and Hetzner
-                # rescue (always on :22) have disjoint host-key state; port
-                # 2222 is the initrd LUKS-unlock sshd.
-                local main_port=62222
-                local ip pw rc
-                ip=$(ssh -G "$ssh_host" 2>/dev/null | awk '/^hostname /{print $2; exit}')
-                if [[ -z "$ip" || "$ip" == "$ssh_host" ]]; then
-                    print -u2 "foundry-unlock: '$ssh_host' is not configured in ~/.ssh/config."
-                    print -u2 "  Add a 'Host foundry' block with HostName set to the server IP and Port $main_port."
-                    return 1
-                fi
-                if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
-                    print "foundry: already up (port $main_port open). Nothing to do."
-                    return 0
-                fi
-                if ! pw=$(security find-generic-password -a foundry -s foundry-luks -w 2>/dev/null); then
-                    print -u2 "foundry-unlock: keychain item 'foundry-luks' not found."
-                    print -u2 "  Seed it once with: foundry-unlock-seed"
-                    return 1
-                fi
-                print "foundry: sending passphrase to initrd on $ssh_host:2222..."
-                printf '%s\n' "$pw" | ssh -tt -p 2222 \
-                    -o IdentitiesOnly=yes \
-                    -o ConnectTimeout=10 \
-                    -o ServerAliveInterval=5 \
-                    -o StrictHostKeyChecking=accept-new \
-                    "root@$ssh_host" >/dev/null 2>&1
-                rc=$?
-                pw=""
-                if [[ $rc -ne 0 ]]; then
-                    print -u2 "foundry-unlock: ssh to initrd returned $rc (wrong passphrase? initrd not up?)"
-                    return $rc
-                fi
-                print "foundry: passphrase accepted, waiting for sshd on :$main_port..."
-                local i
-                for i in $(seq 1 60); do
-                    if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
-                        print "foundry: up."
-                        return 0
-                    fi
-                    sleep 2
-                done
-                print -u2 "foundry: port $main_port still closed after 120s — check the console."
-                return 2
+        # Keep brew shellenv (PATH, MANPATH, INFOPATH, HOMEBREW_*) in the shell
+        # via .zshrc rather than .zprofile, so Home Manager doesn't need to
+        # generate ~/.zprofile
+        initContent = lib.mkMerge [
+          (lib.mkBefore (lib.optionalString pkgs.stdenv.isDarwin ''
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+          ''))
+          (lib.mkAfter ''
+            _zsh_autosuggest_strategy_atuin_auto() {
+                suggestion=$(atuin search --cwd . --cmd-only --limit 1 --search-mode prefix -- "$1")
             }
-          ''}
 
-          # Crash forensics without touching the server. Pulls the latest
-          # snapshot of /var/log/journal from the Storage Box (via the
-          # admin credential — separate from the append-only key foundry
-          # holds) and opens journalctl --file against the restored
-          # directory. Any journalctl args passed through: e.g.
-          #     foundry-logs -u foundryvtt --since -1h
-          #     foundry-logs -p err -n 200
-          # Prompts once for the restic repo password (same string stored
-          # in sops on the server); the input is hidden and never touches
-          # disk outside a 0600 tmpfile that is wiped by the EXIT trap.
-          foundry-logs() {
-              emulate -L zsh
-              local tmpdir
-              tmpdir=$(mktemp -d /tmp/foundry-journal-XXXXXX) || return
-              trap "rm -rf '$tmpdir'" EXIT INT TERM
-              local ssh_cmd="ssh -p 23 -i $HOME/.config/foundry-bootstrap/storagebox_adm -o IdentitiesOnly=yes u580408-sub2@u580408-sub2.your-storagebox.de"
-              local pw_file="$tmpdir/pw"
-              local pw
-              print -n "foundry-logs: restic repo password: "
-              if ! IFS= read -rs pw; then
-                  print
-                  print -u2 "foundry-logs: could not read password."
-                  return 1
-              fi
-              print
-              if [[ -z "$pw" ]]; then
-                  print -u2 "foundry-logs: empty password, aborting."
-                  return 1
-              fi
-              umask 077
-              printf '%s' "$pw" > "$pw_file"
-              pw=""
-              # Explicit --path filter. The Storage Box's forced command
-              # chroots both subaccount URLs to the same `/foundry` dir, so
-              # `rclone:storagebox:foundry` and `rclone:storagebox:foundry-journal`
-              # resolve to a single underlying restic repo. `--path` on
-              # restore is a snapshot selector (pick the newest snapshot
-              # whose `paths` field contains the given path) — here it
-              # picks the latest journal snapshot rather than the daily
-              # 8 GB one. No --include needed: journal snapshots carry
-              # exactly one path, so the selector and the extracted tree
-              # are already the same.
-              if ! nix run nixpkgs#restic -- \
-                  -o "rclone.program=$ssh_cmd" \
-                  -r rclone:storagebox:foundry-journal \
-                  --password-file "$pw_file" \
-                  restore latest \
-                    --path /var/log/journal \
-                    --target "$tmpdir" >/dev/null; then
-                  print -u2 "foundry-logs: restic restore failed."
+            _zsh_autosuggest_strategy_atuin_global() {
+                suggestion=$(atuin search --cmd-only --limit 1 --search-mode prefix -- "$1")
+            }
+            export ZSH_AUTOSUGGEST_STRATEGY=(atuin_auto atuin_global)
+
+            pip() {
+                if ! type -P pip &> /dev/null
+                then
+                    uv pip "$@"
+                else
+                    command pip "$@"
+                fi
+            }
+
+            ${lib.optionalString pkgs.stdenv.isDarwin ''
+              # Foundry (Hetzner) LUKS unlock helpers.
+              # Seed the macOS Keychain once:
+              #     foundry-unlock-seed
+              # Then, after a reboot, unlock the server in one step:
+              #     foundry-unlock
+              #
+              # Requires a `Host foundry` entry in ~/.ssh/config — the IP is looked
+              # up via `ssh -G` so it never appears in this (public) repo.
+              #
+              # The initrd sshd uses `ForceCommand systemd-tty-ask-password-agent --query`,
+              # which reads the passphrase from /dev/tty. `ssh -tt` forces pty allocation
+              # so the piped stdin is fed into the pty that the agent reads from.
+              foundry-unlock() {
+                  emulate -L zsh
+                  local ssh_host=foundry
+                  # Keep in sync with services.openssh.ports in
+                  # modules/hosts/foundry/configuration.nix. The main sshd lives
+                  # on a non-standard port so the production system and Hetzner
+                  # rescue (always on :22) have disjoint host-key state; port
+                  # 2222 is the initrd LUKS-unlock sshd.
+                  local main_port=62222
+                  local ip pw rc
+                  ip=$(ssh -G "$ssh_host" 2>/dev/null | awk '/^hostname /{print $2; exit}')
+                  if [[ -z "$ip" || "$ip" == "$ssh_host" ]]; then
+                      print -u2 "foundry-unlock: '$ssh_host' is not configured in ~/.ssh/config."
+                      print -u2 "  Add a 'Host foundry' block with HostName set to the server IP and Port $main_port."
+                      return 1
+                  fi
+                  if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
+                      print "foundry: already up (port $main_port open). Nothing to do."
+                      return 0
+                  fi
+                  if ! pw=$(security find-generic-password -a foundry -s foundry-luks -w 2>/dev/null); then
+                      print -u2 "foundry-unlock: keychain item 'foundry-luks' not found."
+                      print -u2 "  Seed it once with: foundry-unlock-seed"
+                      return 1
+                  fi
+                  print "foundry: sending passphrase to initrd on $ssh_host:2222..."
+                  printf '%s\n' "$pw" | ssh -tt -p 2222 \
+                      -o IdentitiesOnly=yes \
+                      -o ConnectTimeout=10 \
+                      -o ServerAliveInterval=5 \
+                      -o StrictHostKeyChecking=accept-new \
+                      "root@$ssh_host" >/dev/null 2>&1
+                  rc=$?
+                  pw=""
+                  if [[ $rc -ne 0 ]]; then
+                      print -u2 "foundry-unlock: ssh to initrd returned $rc (wrong passphrase? initrd not up?)"
+                      return $rc
+                  fi
+                  print "foundry: passphrase accepted, waiting for sshd on :$main_port..."
+                  local i
+                  for i in $(seq 1 60); do
+                      if nc -z -G 2 "$ip" "$main_port" >/dev/null 2>&1; then
+                          print "foundry: up."
+                          return 0
+                      fi
+                      sleep 2
+                  done
+                  print -u2 "foundry: port $main_port still closed after 120s — check the console."
                   return 2
-              fi
-              local journals=("$tmpdir"/var/log/journal/*/*.journal(N))
-              if (( ! $#journals )); then
-                  print -u2 "foundry-logs: no .journal files found under the restored tree."
-                  return 3
-              fi
-              journalctl \
-                  --file "''${journals[@]}" \
-                  --no-pager --output short-precise \
-                  "$@"
-          }
+              }
+            ''}
 
-          ${lib.optionalString pkgs.stdenv.isDarwin ''
-            foundry-unlock-seed() {
-                print "Storing LUKS passphrase for foundry in the login keychain."
-                print "(Input is hidden; you will be prompted once.)"
-                security add-generic-password \
-                    -a foundry \
-                    -s foundry-luks \
-                    -l "Foundry LUKS passphrase" \
-                    -D "LUKS passphrase" \
-                    -j "Used by foundry-unlock zsh function" \
-                    -U \
-                    -w
+            # Crash forensics without touching the server. Pulls the latest
+            # snapshot of /var/log/journal from the Storage Box (via the
+            # admin credential — separate from the append-only key foundry
+            # holds) and opens journalctl --file against the restored
+            # directory. Any journalctl args passed through: e.g.
+            #     foundry-logs -u foundryvtt --since -1h
+            #     foundry-logs -p err -n 200
+            # Prompts once for the restic repo password (same string stored
+            # in sops on the server); the input is hidden and never touches
+            # disk outside a 0600 tmpfile that is wiped by the EXIT trap.
+            foundry-logs() {
+                emulate -L zsh
+                local tmpdir
+                tmpdir=$(mktemp -d /tmp/foundry-journal-XXXXXX) || return
+                trap "rm -rf '$tmpdir'" EXIT INT TERM
+                local ssh_cmd="ssh -p 23 -i $HOME/.config/foundry-bootstrap/storagebox_adm -o IdentitiesOnly=yes u580408-sub2@u580408-sub2.your-storagebox.de"
+                local pw_file="$tmpdir/pw"
+                local pw
+                print -n "foundry-logs: restic repo password: "
+                if ! IFS= read -rs pw; then
+                    print
+                    print -u2 "foundry-logs: could not read password."
+                    return 1
+                fi
+                print
+                if [[ -z "$pw" ]]; then
+                    print -u2 "foundry-logs: empty password, aborting."
+                    return 1
+                fi
+                umask 077
+                printf '%s' "$pw" > "$pw_file"
+                pw=""
+                # Explicit --path filter. The Storage Box's forced command
+                # chroots both subaccount URLs to the same `/foundry` dir, so
+                # `rclone:storagebox:foundry` and `rclone:storagebox:foundry-journal`
+                # resolve to a single underlying restic repo. `--path` on
+                # restore is a snapshot selector (pick the newest snapshot
+                # whose `paths` field contains the given path) — here it
+                # picks the latest journal snapshot rather than the daily
+                # 8 GB one. No --include needed: journal snapshots carry
+                # exactly one path, so the selector and the extracted tree
+                # are already the same.
+                if ! nix run nixpkgs#restic -- \
+                    -o "rclone.program=$ssh_cmd" \
+                    -r rclone:storagebox:foundry-journal \
+                    --password-file "$pw_file" \
+                    restore latest \
+                      --path /var/log/journal \
+                      --target "$tmpdir" >/dev/null; then
+                    print -u2 "foundry-logs: restic restore failed."
+                    return 2
+                fi
+                local journals=("$tmpdir"/var/log/journal/*/*.journal(N))
+                if (( ! $#journals )); then
+                    print -u2 "foundry-logs: no .journal files found under the restored tree."
+                    return 3
+                fi
+                journalctl \
+                    --file "''${journals[@]}" \
+                    --no-pager --output short-precise \
+                    "$@"
             }
-          ''}
 
-          bindkey "^ " autosuggest-accept
-          test -e "$HOME/.iterm2_shell_integration.zsh" && source "$HOME/.iterm2_shell_integration.zsh"
-        '';
+            ${lib.optionalString pkgs.stdenv.isDarwin ''
+              foundry-unlock-seed() {
+                  print "Storing LUKS passphrase for foundry in the login keychain."
+                  print "(Input is hidden; you will be prompted once.)"
+                  security add-generic-password \
+                      -a foundry \
+                      -s foundry-luks \
+                      -l "Foundry LUKS passphrase" \
+                      -D "LUKS passphrase" \
+                      -j "Used by foundry-unlock zsh function" \
+                      -U \
+                      -w
+              }
+            ''}
+
+            bindkey "^ " autosuggest-accept
+            test -e "$HOME/.iterm2_shell_integration.zsh" && source "$HOME/.iterm2_shell_integration.zsh"
+          '')
+        ];
 
         shellAliases = {
           venv = "source .venv/bin/activate";
