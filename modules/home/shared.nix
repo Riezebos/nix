@@ -610,6 +610,10 @@
       c.InteractiveShellApp.extensions = ["autoreload"]
     '';
 
+    home.file.".claude/CLAUDE.md".text = ''
+      Use uv for python-related commands. Prefer Edit tools for editing files, remember to call Read before Edit, even for new files.
+    '';
+
     home.stateVersion = "24.11";
     nixpkgs.config.allowUnfree = true;
     fonts.fontconfig.enable = true;
