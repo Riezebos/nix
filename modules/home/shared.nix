@@ -572,6 +572,7 @@
       "$HOME/.local/bin"
       "$HOME/.rd/bin"
       "$HOME/.opencode/bin"
+      "$HOME/.bun/bin"
     ];
 
     home.packages = with pkgs; [
