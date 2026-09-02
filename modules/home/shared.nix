@@ -591,7 +591,7 @@
       material-design-icons
       nerd-fonts.caskaydia-cove
       nerd-fonts.fantasque-sans-mono
-      nil
+      nixd
       rsync
       devenv
       nodejs_24
