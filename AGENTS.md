@@ -12,6 +12,7 @@ Use it to find the right source of truth, not as a replacement for the docs.
 - Backups and restore drills: [`docs/foundry/backups.md`](docs/foundry/backups.md)
 - Break-glass recovery: [`docs/foundry/recovery.md`](docs/foundry/recovery.md)
 - Security model and tradeoffs: [`docs/foundry/security.md`](docs/foundry/security.md)
+- Authentik config as code (blueprints, API): [`docs/foundry/authentik.md`](docs/foundry/authentik.md)
 - Nice-to-have future work: [`docs/foundry/optional-roadmap.md`](docs/foundry/optional-roadmap.md)
 
 ## Common commands

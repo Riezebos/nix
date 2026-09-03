@@ -1,0 +1,41 @@
+# Groups are repo-managed; membership is not.
+#
+# NEVER add a `users:` key to an entry here. The blueprint importer builds the
+# serializer with `partial=True` for objects that already exist, so a *missing*
+# `users` key leaves UI-managed membership alone. An *empty* one would be a
+# real value and would wipe every member on the next deploy.
+#
+# `authentik Admins` and `authentik Read-only` are created by upstream's own
+# blueprints and are deliberately absent here.
+version: 1
+metadata:
+  name: foundry-groups
+entries:
+  # Gates the Agent Sandcastle application.
+  - model: authentik_core.group
+    identifiers:
+      name: app-users
+    attrs:
+      is_superuser: false
+
+  # Maps to Grafana's `Admin` role (see role_attribute_path in authentik.nix).
+  - model: authentik_core.group
+    identifiers:
+      name: foundry-admins
+    attrs:
+      is_superuser: false
+
+  # Maps to Grafana's `GrafanaAdmin` role.
+  - model: authentik_core.group
+    identifiers:
+      name: grafana-admins
+    attrs:
+      is_superuser: false
+
+  # Gates the Sterwerk application. Deliberately separate from `app-users` so
+  # reaching Sandcastle does not imply reaching the candidate tracker.
+  - model: authentik_core.group
+    identifiers:
+      name: sterwerk-users
+    attrs:
+      is_superuser: false

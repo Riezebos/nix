@@ -1,0 +1,27 @@
+# The embedded outpost's provider list, owned in exactly one place.
+#
+# `providers` is a whole-list replacement, not an append: whatever is listed
+# here is what the outpost ends up serving. That is why it is not spread across
+# the per-application blueprints - a provider omitted here silently stops
+# answering forward_auth, and its site starts 403ing for everyone.
+#
+# Runs last (90-) so every provider it references already exists.
+version: 1
+metadata:
+  name: foundry-embedded-outpost
+entries:
+  - model: authentik_outposts.outpost
+    identifiers:
+      managed: goauthentik.io/outposts/embedded
+    attrs:
+      name: authentik Embedded Outpost
+      type: proxy
+      providers:
+        - !Find [
+            authentik_providers_proxy.proxyprovider,
+            [name, Provider for Agent Sandcastle],
+          ]
+        - !Find [
+            authentik_providers_proxy.proxyprovider,
+            [name, Provider for Sterwerk],
+          ]

@@ -1,0 +1,69 @@
+# Grafana: OIDC (native `auth.generic_oauth`), not a proxy provider.
+#
+# The Grafana side of this pairing lives in `modules/features/authentik.nix`
+# under `services.grafana.settings."auth.generic_oauth"`. Keep client_id,
+# redirect URI and scopes in sync across the two.
+#
+# `client_secret` is read from the copy that `authentik-prepare-secrets` places
+# in Authentik's own secret dir; Grafana reads the same value from
+# /var/lib/grafana/secrets/grafana-oidc-client-secret. Both are written from a
+# single generation step so they cannot drift.
+version: 1
+metadata:
+  name: foundry-grafana
+entries:
+  - id: grafana-provider
+    model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: Provider for Grafana
+    attrs:
+      client_type: confidential
+      client_id: grafana
+      client_secret: !File /var/lib/authentik/secrets/grafana-oidc-client-secret
+      # Explicit consent: Grafana is an admin surface, so an interstitial on
+      # first authorization is worth the friction.
+      authorization_flow:
+        !Find [
+          authentik_flows.flow,
+          [slug, default-provider-authorization-explicit-consent],
+        ]
+      invalidation_flow:
+        !Find [
+          authentik_flows.flow,
+          [slug, default-provider-invalidation-flow],
+        ]
+      signing_key:
+        !Find [
+          authentik_crypto.certificatekeypair,
+          [name, authentik Self-signed Certificate],
+        ]
+      property_mappings:
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [managed, goauthentik.io/providers/oauth2/scope-openid],
+          ]
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [managed, goauthentik.io/providers/oauth2/scope-email],
+          ]
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [managed, goauthentik.io/providers/oauth2/scope-profile],
+          ]
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      redirect_uris:
+        - matching_mode: strict
+          url: https://grafana.simonito.com/login/generic_oauth
+
+  - model: authentik_core.application
+    identifiers:
+      slug: grafana
+    attrs:
+      name: Grafana
+      provider: !KeyOf grafana-provider
+      policy_engine_mode: any
+
+  # No policy binding: Grafana maps group membership onto Grafana roles itself
+  # (Viewer for everyone else), so gating at the application level would only
+  # duplicate that in a second place.

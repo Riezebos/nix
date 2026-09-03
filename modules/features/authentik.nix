@@ -14,9 +14,23 @@
     secretDir = "${dataDir}/secrets";
     storageDir = "${dataDir}/storage";
     secretKeyPath = "${secretDir}/secret-key";
+    iacTokenPath = "${secretDir}/iac-token";
     grafanaSecretDir = "/var/lib/grafana/secrets";
     grafanaClientSecretPath = "${grafanaSecretDir}/grafana-oidc-client-secret";
     grafanaSecretKeyPath = "${grafanaSecretDir}/grafana-secret-key";
+
+    # Authentik-readable mirror of the OIDC client secret. Grafana's own copy is
+    # 0400 grafana:grafana, so the blueprint's `!File` cannot read it; both are
+    # written from one generation step below so they cannot drift.
+    grafanaClientSecretMirror = "${secretDir}/grafana-oidc-client-secret";
+
+    # Repo-managed Authentik objects. Applied by authentik-blueprints.service on
+    # every activation where the contents changed; see docs/foundry/authentik.md.
+    blueprintsDir = ./authentik-blueprints;
+    blueprintFiles =
+      lib.sort (a: b: a < b)
+      (lib.filter (n: lib.hasSuffix ".yaml" n)
+        (lib.attrNames (builtins.readDir blueprintsDir)));
 
     prepareSecrets = pkgs.writeShellScript "authentik-prepare-secrets" ''
       set -euo pipefail
@@ -34,11 +48,30 @@
         chmod 0400 ${secretKeyPath}
       fi
 
+      # API token for out-of-band administration of Authentik itself (the
+      # `svc-iac` service account, see 05-iac-service-account.yaml). Generated
+      # here rather than kept in sops so a full-admin credential never lands in
+      # the repo; read it back with
+      #   ssh deploy@foundry sudo cat ${iacTokenPath}
+      if [ ! -s ${iacTokenPath} ]; then
+        ${pkgs.openssl}/bin/openssl rand -hex 32 > ${iacTokenPath}
+        chown authentik:authentik ${iacTokenPath}
+        chmod 0400 ${iacTokenPath}
+      fi
+
       if [ ! -s ${grafanaClientSecretPath} ]; then
         ${pkgs.openssl}/bin/openssl rand -base64 36 | tr -d '\n' > ${grafanaClientSecretPath}
         printf '\n' >> ${grafanaClientSecretPath}
         chown grafana:grafana ${grafanaClientSecretPath}
         chmod 0400 ${grafanaClientSecretPath}
+      fi
+
+      # Mirror it where the blueprint's `!File` can read it. Sourced from
+      # Grafana's copy rather than generated independently, so the two are the
+      # same value by construction on both a fresh host and this existing one.
+      if ! ${pkgs.diffutils}/bin/cmp -s ${grafanaClientSecretPath} ${grafanaClientSecretMirror}; then
+        install -m 0400 -o authentik -g authentik \
+          ${grafanaClientSecretPath} ${grafanaClientSecretMirror}
       fi
 
       # Grafana 26.05 dropped the built-in default for security.secret_key, so
@@ -138,6 +171,9 @@
         "authentik-migrate.service"
         "authentik-server.service"
         "authentik-worker.service"
+        # Blueprints read the IaC token and the Grafana client secret mirror
+        # through `!File`, both of which are written here.
+        "authentik-blueprints.service"
       ];
       serviceConfig = {
         Type = "oneshot";
@@ -198,9 +234,47 @@
           };
       };
 
-    # Grafana is the first native OIDC target. The provider/application pair
-    # still needs to be created once inside Authentik, but the client secret is
-    # already persisted locally in Grafana's state dir so the app can read it.
+    # Authentik's own config as code. `ak apply_blueprint` is idempotent, so
+    # this re-asserts every object in ./authentik-blueprints on each activation
+    # where the directory changed (a changed file changes the store path, which
+    # changes ExecStart, which is what makes systemd re-run it).
+    #
+    # AUTHENTIK_BLUEPRINTS_DIR is overridden for this unit only: the importer
+    # refuses paths outside that root, and the long-running services must keep
+    # the package default so upstream's own default/ and system/ blueprints
+    # still get discovered.
+    systemd.services.authentik-blueprints =
+      authentikBaseService
+      // {
+        description = "Apply repo-managed Authentik blueprints";
+        wantedBy = ["multi-user.target"];
+        # After the worker, because upstream's default flows and scope mappings
+        # are applied by worker-side discovery and every blueprint here `!Find`s
+        # them. On a first boot that discovery may not have run yet, hence the
+        # bounded retry rather than a hard failure.
+        after = authentikBaseService.after ++ ["authentik-migrate.service" "authentik-worker.service"];
+        wants = authentikBaseService.wants ++ ["authentik-migrate.service" "authentik-worker.service"];
+        environment =
+          authentikBaseService.environment
+          // {
+            AUTHENTIK_BLUEPRINTS_DIR = "${blueprintsDir}";
+          };
+        startLimitIntervalSec = 600;
+        startLimitBurst = 6;
+        serviceConfig =
+          authentikBaseService.serviceConfig
+          // {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            Restart = "on-failure";
+            RestartSec = 30;
+            ExecStart = "${pkgs.authentik}/bin/ak apply_blueprint ${lib.concatStringsSep " " blueprintFiles}";
+          };
+      };
+
+    # Grafana is the first native OIDC target. Its provider/application pair is
+    # declared in ./authentik-blueprints/10-grafana.yaml; the client secret is
+    # persisted locally in Grafana's state dir so the app can read it.
     services.grafana.settings = {
       server = {
         domain = "grafana.simonito.com";

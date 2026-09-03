@@ -84,6 +84,7 @@ modules/
   features/
     alerting.nix
     authentik.nix
+    authentik-blueprints/   # Authentik config as code; see docs/foundry/authentik.md
     caddy.nix
     crowdsec.nix
     deliverable.nix
