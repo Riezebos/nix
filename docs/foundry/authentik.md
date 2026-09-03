@@ -91,12 +91,12 @@ token, for inspecting and diffing config without the admin UI.
 ```bash
 TOKEN=$(ssh deploy@foundry sudo cat /var/lib/authentik/secrets/iac-token)
 curl -sS -H "Authorization: Bearer $TOKEN" \
-  https://auth.simonito.com/api/v3/core/applications/?superuser_full_list=true
+  https://auth.datagiant.org/api/v3/core/applications/?superuser_full_list=true
 ```
 
 The token is generated on the host by `authentik-prepare-secrets`, not kept in
 sops, so a full-admin credential never lands in the repo. It is reachable from
-the public internet at `auth.simonito.com/api/v3/`; treat it like a root
+the public internet at `auth.datagiant.org/api/v3/`; treat it like a root
 password. To rotate: delete the file, restart `authentik-prepare-secrets` and
 `authentik-blueprints`.
 

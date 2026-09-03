@@ -300,9 +300,9 @@
         client_id = "grafana";
         client_secret = "$__file{${grafanaClientSecretPath}}";
         scopes = "openid profile email";
-        auth_url = "https://auth.simonito.com/application/o/authorize/";
-        token_url = "https://auth.simonito.com/application/o/token/";
-        api_url = "https://auth.simonito.com/application/o/userinfo/";
+        auth_url = "https://auth.datagiant.org/application/o/authorize/";
+        token_url = "https://auth.datagiant.org/application/o/token/";
+        api_url = "https://auth.datagiant.org/application/o/userinfo/";
         login_attribute_path = "preferred_username";
         email_attribute_path = "email";
         name_attribute_path = "name";

@@ -53,7 +53,14 @@
         ${commonHeaders}
       '';
 
+      # Authentik moved off `auth.simonito.com`; keep the old name answering so
+      # bookmarks and any half-updated client config land on the new host
+      # instead of a TLS error. Safe to delete once nothing hits it.
       virtualHosts."auth.simonito.com".extraConfig = ''
+        redir https://auth.datagiant.org{uri} permanent
+      '';
+
+      virtualHosts."auth.datagiant.org".extraConfig = ''
         encode zstd gzip
         ${mkAccessLog "auth"}
 

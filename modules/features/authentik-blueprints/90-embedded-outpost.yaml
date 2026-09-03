@@ -16,6 +16,14 @@ entries:
     attrs:
       name: authentik Embedded Outpost
       type: proxy
+      # `authentik_host` is what the outpost sends unauthenticated browsers to.
+      # authentik only ever writes it once, at outpost creation, so it is sticky
+      # state that a domain move has to correct by hand - pinning it here keeps
+      # it correct on a rebuilt host too. Like `providers`, `config` is a
+      # whole-value replacement; unset keys fall back to authentik's own
+      # defaults (log_level info, refresh_interval 5m), which is what we want.
+      config:
+        authentik_host: https://auth.datagiant.org
       providers:
         - !Find [
             authentik_providers_proxy.proxyprovider,
