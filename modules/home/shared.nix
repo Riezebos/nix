@@ -536,6 +536,8 @@
           gsw = "git switch";
           gswc = "git switch -c";
           gswm = "git switch main";
+          # Switch to main, pull, then return to the branch you were on.
+          gup = ''current=$(git symbolic-ref --quiet --short HEAD) && git switch main && git pull && git switch "$current"'';
         };
         plugins = [
           {
