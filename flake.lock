@@ -500,11 +500,11 @@
         "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1788455681,
-        "narHash": "sha256-4QbWhKsJzO5/RjOhjc6eyf9aE+3KjwyPhv4Hgefgd4I=",
+        "lastModified": 1788457605,
+        "narHash": "sha256-fxW0oUsAoCfGvw9ce5ked0qk44VJ0f3JX8NUWCeg58s=",
         "ref": "refs/heads/main",
-        "rev": "6d836f917997e260ac4e35fc074e741b95879987",
-        "revCount": 14,
+        "rev": "6677a3dec4a43ac34cc4319a7cedfbf6136f0ae7",
+        "revCount": 15,
         "type": "git",
         "url": "ssh://git@github.com/Riezebos/sterwerk-app-v2.git"
       },
