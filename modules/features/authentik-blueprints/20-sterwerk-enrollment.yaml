@@ -1,0 +1,238 @@
+# Invitation-only self-service enrollment for the Sterwerk candidate tracker.
+#
+# Someone with a @sterwerk.nl address gets a link, sets a password, and lands in
+# `sterwerk-users` — which is what 30-sterwerk.yaml's policy binding gates the
+# application on. No admin has to create the account or edit group membership
+# afterwards.
+#
+# Why invitations rather than an open "Sign up" link on the login page: foundry
+# sends no mail (nothing in modules/ configures SMTP), so an email verification
+# stage cannot run, and an unverified domain check is only an honour system —
+# anyone who found the URL could type `whoever@sterwerk.nl` and reach the
+# tracker. Handing out the link *is* the verification step. If SMTP ever lands
+# here, add an `authentik_stages_email.emailstage` between the prompt and the
+# write stage, set `create_users_as_inactive: true` below, and point the
+# `default-authentication-identification` stage's `enrollment_flow` at this
+# flow to get a public sign-up link.
+#
+# This is the first repo-managed flow; everything else under flows/stages is
+# still UI-managed. See docs/foundry/authentik.md.
+#
+# Issuing an invite (UI: Directory > Invitations, or the API) is deliberately
+# not repo-managed — invitations are per-person data, like group membership.
+# `single_use` and expiry are independent knobs there; a reusable link with a
+# short `expires` is a time-boxed shared sign-up. See docs/foundry/authentik.md.
+version: 1
+metadata:
+  name: foundry-sterwerk-enrollment
+entries:
+  # ---------------------------------------------------------------- policies
+  #
+  # Runs as a `validation_policies` member of the prompt stage below, so it
+  # sees the submitted-but-not-yet-written values in `prompt_data` and can
+  # reject them with a message rendered on the form.
+  #
+  # It also *writes* `username`, because the form deliberately has no username
+  # field — the account is keyed on the email address. That works because
+  # PromptChallengeResponse.validate hands the policy engine the very dict it
+  # is about to return as `prompt_data`, and PolicyEngine.build runs each
+  # policy inline (`task.run()`) rather than in a forked process whenever the
+  # current process is not a daemon, which the web workers serving this flow
+  # are not. Mutating a policy request is unusual; the alternative — a hidden
+  # prompt with an `initial_value_expression` — cannot work, since initial
+  # values are computed when the form is *rendered*, before an address exists.
+  - id: sterwerk-email-policy
+    model: authentik_policies_expression.expressionpolicy
+    identifiers:
+      name: sterwerk-enrollment-email-as-username
+    attrs:
+      execution_logging: false
+      expression: |
+        prompt_data = request.context.get("prompt_data", {})
+        email = prompt_data.get("email", "").strip().lower()
+
+        if not email.endswith("@sterwerk.nl"):
+            ak_message("Registration is limited to @sterwerk.nl email addresses.")
+            return False
+
+        # No username prompt means no duplicate check from the prompt stage, and
+        # an unchecked collision would surface as an IntegrityError on save.
+        if ak_user_by(username=email):
+            ak_message("An account already exists for that address.")
+            return False
+
+        prompt_data["email"] = email
+        prompt_data["username"] = email
+        return True
+
+  # ----------------------------------------------------------------- prompts
+  #
+  # `name` is globally unique across all prompts, hence the `sterwerk-` prefix;
+  # `field_key` is what ends up in `prompt_data` and, for the keys the write
+  # stage knows (username, email, name, password), on the created user.
+  #
+  # There is deliberately no username prompt — the policy above derives one
+  # from the address, so nobody has to invent a second identifier.
+  - id: prompt-name
+    model: authentik_stages_prompt.prompt
+    identifiers:
+      name: sterwerk-enrollment-name
+    attrs:
+      field_key: name
+      label: Full name
+      type: text
+      required: true
+      order: 10
+
+  - id: prompt-email
+    model: authentik_stages_prompt.prompt
+    identifiers:
+      name: sterwerk-enrollment-email
+    attrs:
+      field_key: email
+      label: Email
+      type: email
+      required: true
+      sub_text: Must be your @sterwerk.nl address.
+      order: 20
+
+  # Two fields of type `password` on one stage are compared automatically by
+  # PromptChallengeResponse.validate — no policy needed for the "must match"
+  # half. Only `password` is consumed by the write stage.
+  - id: prompt-password
+    model: authentik_stages_prompt.prompt
+    identifiers:
+      name: sterwerk-enrollment-password
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      order: 30
+
+  - id: prompt-password-repeat
+    model: authentik_stages_prompt.prompt
+    identifiers:
+      name: sterwerk-enrollment-password-repeat
+    attrs:
+      field_key: password_repeat
+      label: Repeat password
+      type: password
+      required: true
+      order: 40
+
+  # ------------------------------------------------------------------ stages
+  #
+  # `continue_flow_without_invitation: false` (the model default, spelled out
+  # here because it is the entire security property) cancels the flow when no
+  # `?itoken=` is present, so the bare flow URL is not a public sign-up page.
+  - id: stage-invitation
+    model: authentik_stages_invitation.invitationstage
+    identifiers:
+      name: sterwerk-enrollment-invitation
+    attrs:
+      continue_flow_without_invitation: false
+
+  - id: stage-prompt
+    model: authentik_stages_prompt.promptstage
+    identifiers:
+      name: sterwerk-enrollment-prompt
+    attrs:
+      fields:
+        - !KeyOf prompt-name
+        - !KeyOf prompt-email
+        - !KeyOf prompt-password
+        - !KeyOf prompt-password-repeat
+      validation_policies:
+        - !KeyOf sterwerk-email-policy
+
+  # `always_create` rather than `create_when_required`: this flow is only ever
+  # entered anonymously to make a brand-new account, never to fill in one that
+  # an earlier stage put in the flow context.
+  #
+  # `create_users_group` is the whole grant — membership of `sterwerk-users` is
+  # what 30-sterwerk.yaml's policy binding checks. `user_type: external` is the
+  # model default and the right one for a proxy-provider app: these people
+  # never touch the admin interface.
+  - id: stage-write
+    model: authentik_stages_user_write.userwritestage
+    identifiers:
+      name: sterwerk-enrollment-write
+    attrs:
+      user_creation_mode: always_create
+      create_users_as_inactive: false
+      create_users_group: !Find [authentik_core.group, [name, sterwerk-users]]
+      user_type: external
+      user_path_template: users/sterwerk
+
+  # A stage of our own rather than a `!Find` of upstream's
+  # `default-authentication-login`, so the session length for invited users can
+  # be tuned without touching how everyone else logs in.
+  - id: stage-login
+    model: authentik_stages_user_login.userloginstage
+    identifiers:
+      name: sterwerk-enrollment-login
+    attrs:
+      session_duration: seconds=0 # until the browser closes
+      remember_me_offset: seconds=0
+      terminate_other_sessions: false
+
+  # -------------------------------------------------------------------- flow
+  #
+  # Invite URL:
+  #   https://auth.datagiant.org/if/flow/sterwerk-enrollment/?itoken=<token>
+  - id: sterwerk-enrollment-flow
+    model: authentik_flows.flow
+    identifiers:
+      slug: sterwerk-enrollment
+    attrs:
+      name: Sterwerk Enrollment
+      title: Create your Sterwerk account
+      designation: enrollment
+      authentication: require_unauthenticated
+      denied_action: message_continue
+      compatibility_mode: false
+
+  # The invitation stage runs first so an invalid link fails before anyone
+  # types anything. The tradeoff: a single-use invitation is consumed here, at
+  # the start, so abandoning the flow half-way burns the link and a new one has
+  # to be issued.
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf sterwerk-enrollment-flow
+      order: 0
+    attrs:
+      stage: !KeyOf stage-invitation
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+      invalid_response_action: retry
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf sterwerk-enrollment-flow
+      order: 10
+    attrs:
+      stage: !KeyOf stage-prompt
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+      invalid_response_action: retry
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf sterwerk-enrollment-flow
+      order: 20
+    attrs:
+      stage: !KeyOf stage-write
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+      invalid_response_action: retry
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf sterwerk-enrollment-flow
+      order: 30
+    attrs:
+      stage: !KeyOf stage-login
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+      invalid_response_action: retry

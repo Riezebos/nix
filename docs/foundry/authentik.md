@@ -12,8 +12,9 @@ admin UI: the next deploy overwrites it.
 |---|---|
 | Groups (name, superuser flag) | Which users exist |
 | Providers and applications | Which groups a user is in |
-| Application access bindings | Flows and stages |
-| The embedded outpost's provider list | The rest of the default brand |
+| Application access bindings | Flows and stages, except the Sterwerk enrollment flow |
+| The embedded outpost's provider list | Invitations |
+| The Sterwerk enrollment flow and its stages | The rest of the default brand |
 | The default brand's `branding_*` fields | Everything else |
 
 The split is enforced by how the importer works, not by convention: it builds
@@ -25,6 +26,92 @@ but an *empty* one would wipe every member on the next deploy.
 The one deliberate exception is `05-iac-service-account.yaml`, which declares the
 `svc-iac` machine identity and its group. It has to be self-healing or a rebuilt
 host would come back with no way to administer Authentik except the UI.
+
+## Sterwerk enrollment
+
+`20-sterwerk-enrollment.yaml` lets someone at Sterwerk create their own account
+from a single-use invitation link, without an admin touching the directory. Its
+user-write stage sets `create_users_group: sterwerk-users`, which is the group
+`30-sterwerk.yaml`'s policy binding gates the application on — so joining the
+group *is* the grant, and no membership edit follows.
+
+It is invitation-based rather than an open "Sign up" link because foundry sends
+no mail. Nothing under `modules/` configures SMTP, so an email verification
+stage cannot run, and a bare `@sterwerk.nl` check on a typed address is only an
+honour system. Handing out the link is the verification step. The stage sets
+`continue_flow_without_invitation: false`, so the flow URL without a token
+cancels rather than registering anyone.
+
+The prompt stage still carries an expression policy requiring an `@sterwerk.nl`
+address, as a second check and to keep the intent visible.
+
+To invite someone: **Directory > Invitations > Create**, flow
+`sterwerk-enrollment`. Send them
+
+```
+https://auth.datagiant.org/if/flow/sterwerk-enrollment/?itoken=<token>
+```
+
+They give a name, their address and a password, and land in Sterwerk logged in.
+Invitations are per-person data and deliberately not repo-managed, like group
+membership.
+
+### No username field
+
+The form asks for an email, not a username. Authentik has no global switch for
+this — `username` is inherited from Django's `AbstractUser`, where it is
+required and unique, so it cannot be turned off; it can only be filled in for
+the user. The validation policy on the prompt stage does that, copying the
+lowercased address into `prompt_data["username"]` before the write stage reads
+it. New accounts therefore have `username == email`.
+
+This works because `PromptChallengeResponse.validate` hands the policy engine
+the very dict it is about to return, and `PolicyEngine.build` runs policies
+inline rather than in a forked process when the current process is not a daemon
+— which the web workers serving this flow are not. A hidden prompt with an
+`initial_value_expression` cannot do the same job: initial values are computed
+when the form is rendered, before any address has been typed.
+
+The policy also has to check for a duplicate account itself, since dropping the
+`username`-type prompt drops the collision check that came with it.
+
+Logging in by email already works account-wide and needed no change:
+`default-authentication-identification` has `user_fields: ["email", "username"]`,
+so either identifier is accepted and the login form reads "Email or Username".
+
+Narrowing that to `["email"]` is possible — the `simon` test account, the only
+one without an address, was disabled on 2026-09-03 — but it buys nothing except
+the form label, and it fails closed: any account created without an email can
+never sign in. Left alone deliberately.
+
+### Single-use versus time-limited links
+
+`single_use` and expiry are independent fields — `Invitation` extends
+`ExpiringModel`, which carries `expires` and `expiring` — so pick per invite:
+
+- **Single use, with an expiry.** Dies on first use or at the timestamp,
+  whichever comes first. The default choice, and the right one for a link that
+  might get forwarded on.
+- **Reusable, with an expiry** (`single_use` off, `expires` set). One link that
+  works until the timestamp, for onboarding several people at once. During that
+  window the `@sterwerk.nl` policy is the *only* limit on who registers, and one
+  person can create several accounts — so keep the window short.
+- **Reusable, never expiring** (`expiring` off). Effectively a permanent open
+  sign-up URL gated only on the email domain. Avoid.
+
+`filter_not_expired` deletes the invitation on lookup once past `expires`, so a
+stale link fails closed with "Invalid invite/invite not found".
+
+Two more things to know. A single-use invitation is consumed by the *first*
+stage, so abandoning the form half-way burns the link and a fresh one has to be
+issued. And `fixed_data` on an invitation is merged into the prompt data, so
+setting `{"email": "someone@sterwerk.nl"}` there pre-fills the address if you
+want to pin a single-use link to a specific person.
+
+If SMTP ever arrives, this can become a public sign-up: add an
+`authentik_stages_email.emailstage` between the prompt and write stages, set
+`create_users_as_inactive: true`, and point the
+`default-authentication-identification` stage's `enrollment_flow` at this flow.
 
 ## Theming
 
