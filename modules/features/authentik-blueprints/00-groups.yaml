@@ -11,7 +11,10 @@ version: 1
 metadata:
   name: foundry-groups
 entries:
-  # Gates the Agent Sandcastle application.
+  # Gates nothing since the Agent Sandcastle web launcher was retired in
+  # 8939625 and its Authentik objects were deleted. Kept only because it still
+  # has members; drop it here and delete the group in the UI when you are sure
+  # nobody needs restoring.
   - model: authentik_core.group
     identifiers:
       name: app-users
