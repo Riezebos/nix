@@ -426,6 +426,22 @@
         "type": "github"
       }
     },
+    "nixpkgs_3": {
+      "locked": {
+        "lastModified": 1767313136,
+        "narHash": "sha256-16KkgfdYqjaeRGBaYsNrhPRRENs0qzkQVUooNHtoy2w=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "agent-sandcastle": "agent-sandcastle",
@@ -439,7 +455,8 @@
         "import-tree": "import-tree",
         "nixpkgs": "nixpkgs_2",
         "nixpkgs-devenv": "nixpkgs-devenv",
-        "sops-nix": "sops-nix"
+        "sops-nix": "sops-nix",
+        "sterwerk": "sterwerk"
       }
     },
     "sops-nix": {
@@ -476,6 +493,24 @@
       "original": {
         "type": "git",
         "url": "https://spectrum-os.org/git/spectrum"
+      }
+    },
+    "sterwerk": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_3"
+      },
+      "locked": {
+        "lastModified": 1788455681,
+        "narHash": "sha256-4QbWhKsJzO5/RjOhjc6eyf9aE+3KjwyPhv4Hgefgd4I=",
+        "ref": "refs/heads/main",
+        "rev": "6d836f917997e260ac4e35fc074e741b95879987",
+        "revCount": 14,
+        "type": "git",
+        "url": "ssh://git@github.com/Riezebos/sterwerk-app-v2.git"
+      },
+      "original": {
+        "type": "git",
+        "url": "ssh://git@github.com/Riezebos/sterwerk-app-v2.git"
       }
     },
     "systems": {

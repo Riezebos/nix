@@ -42,6 +42,12 @@
     # Keep its nixpkgs independent in flake.lock so runners are built from the
     # exact upstream inputs the CLI host was tested with.
     agent-sandcastle.url = "github:Riezebos/agent-sandcastle.nix";
+
+    # sterwerk-app-v2 is the Phoenix candidate tracker (private repo, fetched
+    # over SSH). Its nixpkgs stays independent like agent-sandcastle's: the
+    # package was built and tested against nixos-25.05's beam tooling, and
+    # the release bundles its own erlang anyway.
+    sterwerk.url = "git+ssh://git@github.com/Riezebos/sterwerk-app-v2.git";
   };
 
   outputs = inputs:

@@ -94,6 +94,7 @@
         "/var/lib/foundryvtt-staging"
         "/var/lib/victoriametrics"
         "/var/lib/loki"
+        "/var/lib/sterwerk"
       ];
 
       # Safe to leave on. Init writes a handful of new objects (`config`,

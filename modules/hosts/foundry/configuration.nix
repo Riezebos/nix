@@ -22,6 +22,7 @@
       self.nixosModules.monitoring
       self.nixosModules.alerting
       self.nixosModules.agentSandcastleCli
+      self.nixosModules.sterwerkFeature
       inputs.disko.nixosModules.disko
       inputs.sops-nix.nixosModules.sops
     ];
