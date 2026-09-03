@@ -1,0 +1,76 @@
+# The default brand's `branding_*` fields only.
+#
+# Everything else on the brand stays UI-managed: the importer builds a partial
+# serializer for objects that already exist, so the `flow_*` foreign keys,
+# `default_application` and `attributes` are left alone by this file.
+#
+# This entry must only ever *update* the brand upstream's `Default - Brand`
+# created, never create one itself: a brand created here would have no
+# `flow_authentication`, and upstream's `state: created` guard ("no default brand
+# exists") would then decline to fix it, leaving a host that cannot log in.
+#
+# Ordering makes that safe without a guard. `ak apply_blueprint` aborts the whole
+# run on the first failure, so this file is only reached when `10-grafana.yaml`
+# has already resolved `!Find [authentik_flows.flow, ...]` against upstream's
+# packaged `default/` blueprints — which the worker applies in the same discovery
+# pass that applies `default-brand.yaml`. Flows present therefore implies brand
+# present. Until then the unit fails and retries; see docs/foundry/authentik.md.
+#
+# `authentik_blueprints.metaapplyblueprint` would state that dependency
+# explicitly, but cannot be used in this repo: it resolves the referenced
+# blueprint's path relative to `AUTHENTIK_BLUEPRINTS_DIR`, which this unit
+# overrides to the store path of this directory, so upstream's packaged files are
+# unreachable from here.
+version: 1
+metadata:
+  name: foundry-brand
+entries:
+  - model: authentik_brands.brand
+    identifiers:
+      domain: authentik-default
+      default: true
+    attrs:
+      branding_title: datagiant
+
+      # `branding_logo`, `branding_favicon` and `branding_default_flow_background`
+      # are deliberately absent. They are FileFields whose validator rejects an
+      # empty value, so they cannot be blanked — only pointed at another file.
+      # Until there is a logo worth uploading, the CSS below hides the stock
+      # authentik wordmark and background instead.
+
+      # Injected twice by the web UI: into `<style data-id="brand-css">` in the
+      # document head, and into every Lit component's render root via
+      # `finalizeStyles`. So these selectors reach both the light DOM (`body`,
+      # the slotted footer) and inside shadow roots (the login card), which is
+      # otherwise impossible.
+      branding_custom_css: |
+        /* Drop the stock photo background. `body::before` is the only consumer
+           of this custom property; the value is set on :root by a server-rendered
+           <style> that comes after brand-css, hence !important. */
+        :root,
+        body {
+          --ak-global--background-image: none !important;
+        }
+
+        /* The authentik wordmark above the login card. Scoped to the flow
+           executor's brand header so the admin and user interfaces keep their
+           navbar logo. Remove this rule if branding_logo ever points at a real
+           logo of ours. */
+        .pf-c-login__main-header.pf-c-brand {
+          display: none;
+        }
+
+        /* Flatten the card: with no background image behind it, the drop shadow
+           reads as noise. */
+        .pf-c-login__main {
+          box-shadow: none;
+          border: 1px solid var(--pf-global--BorderColor--100);
+        }
+
+        /* "Powered by authentik" and the brand footer links. Rendered in the
+           light DOM as <ak-brand-links slot="footer">. It also forces a
+           light-on-dark text color for legibility over the background image,
+           which would be invisible now that the image is gone. */
+        ak-brand-links {
+          display: none;
+        }

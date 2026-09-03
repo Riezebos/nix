@@ -12,8 +12,9 @@ admin UI: the next deploy overwrites it.
 |---|---|
 | Groups (name, superuser flag) | Which users exist |
 | Providers and applications | Which groups a user is in |
-| Application access bindings | Brands, flows, stages |
-| The embedded outpost's provider list | Everything else |
+| Application access bindings | Flows and stages |
+| The embedded outpost's provider list | The rest of the default brand |
+| The default brand's `branding_*` fields | Everything else |
 
 The split is enforced by how the importer works, not by convention: it builds
 serializers with `partial=True` for objects that already exist, so a key absent
@@ -25,6 +26,28 @@ The one deliberate exception is `05-iac-service-account.yaml`, which declares th
 `svc-iac` machine identity and its group. It has to be self-healing or a rebuilt
 host would come back with no way to administer Authentik except the UI.
 
+## Theming
+
+`40-brand.yaml` de-brands the login pages: it sets `branding_title` and hides
+authentik's wordmark, photo background and "Powered by authentik" footer with
+`branding_custom_css`.
+
+CSS is the tool for this rather than the file fields because `branding_logo`,
+`branding_favicon` and `branding_default_flow_background` are `FileField`s whose
+validator rejects an empty value — they can be repointed but not cleared. If we
+ever upload our own logo, set `branding_logo` and drop the rule that hides
+`.pf-c-login__main-header.pf-c-brand`.
+
+Custom CSS is unusually far-reaching here. The web UI writes it into
+`<style data-id="brand-css">` in the document head *and* adopts it into every Lit
+component's render root, so plain PatternFly 4 selectors work inside shadow DOM.
+Selectors are therefore tied to authentik's markup and can break on upgrade;
+re-check the flow pages after a version bump.
+
+Two knobs deliberately left alone for now: `attributes.settings` on the brand
+(theme base, and `enabledFeatures` for the API/notification drawers and search)
+and each flow's `layout` and `background`. Both stay UI-managed.
+
 ## How it is applied
 
 `authentik-blueprints.service` is a oneshot that runs
@@ -35,7 +58,12 @@ that reference them, providers (`10-`–`30-`) before the outpost that lists the
 (`90-`). Cross-file references use `!Find`; within a file, `!KeyOf` is clearer.
 
 The unit sets `AUTHENTIK_BLUEPRINTS_DIR` to the store path of this directory for
-itself only. The importer refuses any path outside that root, and the
+itself only. One consequence: `authentik_blueprints.metaapplyblueprint` is
+unusable in this directory. It resolves the referenced blueprint's path relative
+to that variable, so upstream's packaged `default/` files are not reachable and
+the entry fails with `BlueprintRetrievalFailed`. Express ordering against those
+blueprints through file numbering instead — see the header of `40-brand.yaml`.
+The importer refuses any path outside that root, and the
 long-running services must keep the package default so upstream's own `default/`
 and `system/` blueprints still get discovered by the worker.
 
