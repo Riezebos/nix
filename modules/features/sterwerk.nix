@@ -15,14 +15,26 @@
       environmentFile = config.sops.templates."sterwerk-env".path;
     };
 
-    # The release ships without a bundled release cookie (nixpkgs
-    # `removeCookie`) and refuses to boot without SECRET_KEY_BASE, so both
-    # ride in one sops template consumed as the unit's EnvironmentFile.
+    # Runtime credentials ride in one sops template consumed as the unit's
+    # EnvironmentFile. Besides the Phoenix release secrets, Sterwerk needs
+    # these PerfectView credentials for its candidate import and sync.
     sops.secrets."sterwerk/secret_key_base" = {
       owner = "root";
       mode = "0400";
     };
     sops.secrets."sterwerk/release_cookie" = {
+      owner = "root";
+      mode = "0400";
+    };
+    sops.secrets."sterwerk/pv_api_key" = {
+      owner = "root";
+      mode = "0400";
+    };
+    sops.secrets."sterwerk/pv_database_id" = {
+      owner = "root";
+      mode = "0400";
+    };
+    sops.secrets."sterwerk/pv_user_id" = {
       owner = "root";
       mode = "0400";
     };
@@ -36,6 +48,9 @@
       content = ''
         SECRET_KEY_BASE=${config.sops.placeholder."sterwerk/secret_key_base"}
         RELEASE_COOKIE=${config.sops.placeholder."sterwerk/release_cookie"}
+        PV_API_KEY=${config.sops.placeholder."sterwerk/pv_api_key"}
+        PV_DATABASE_ID=${config.sops.placeholder."sterwerk/pv_database_id"}
+        PV_USER_ID=${config.sops.placeholder."sterwerk/pv_user_id"}
       '';
     };
 
