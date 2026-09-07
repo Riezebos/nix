@@ -30,6 +30,31 @@ jobs:
           extra-conf: |
             accept-flake-config = true
 
+      # The flake imports the private Sterwerk application repository, so the
+      # lock updater needs the same read-only deploy key as the build job.
+      - name: Setup Sterwerk repository SSH key
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.STERWERK_DEPLOY_KEY }}
+
+      # Avoid trusting a changed GitHub host key during an unattended update.
+      # webfactory/ssh-agent maps repository-specific deploy keys to
+      # key-<hash>.github.com aliases, so pin those aliases to the same key.
+      - name: Pin GitHub host key
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat >> ~/.ssh/config <<'EOF'
+          Host github.com key-*.github.com
+            HostKeyAlias github.com
+            GlobalKnownHostsFile /dev/null
+            UserKnownHostsFile ~/.ssh/known_hosts
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
+
       - name: Update flake.lock
         uses: DeterminateSystems/update-flake-lock@834c491b2ece4de0bbd00d85214bb5e83b4da5c6 # v28
         with:
