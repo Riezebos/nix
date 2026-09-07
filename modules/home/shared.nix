@@ -81,6 +81,7 @@
           "temp.ipynb"
           "my_local_files/"
           ".claude/settings.local.json"
+          ".rodney/"
         ];
         includes = [
           {
