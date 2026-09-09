@@ -177,6 +177,17 @@ entries:
       remember_me_offset: seconds=0
       terminate_other_sessions: false
 
+  # Enrollment flows otherwise fall back to Authentik's portal after the user
+  # login stage. Sterwerk users are intentionally not granted portal access;
+  # send them straight to the application they were invited to use instead.
+  - id: stage-redirect
+    model: authentik_stages_redirect.redirectstage
+    identifiers:
+      name: sterwerk-enrollment-redirect
+    attrs:
+      mode: static
+      target_static: https://sterwerk.datagiant.org/
+
   # -------------------------------------------------------------------- flow
   #
   # Invite URL:
@@ -233,6 +244,16 @@ entries:
       order: 30
     attrs:
       stage: !KeyOf stage-login
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+      invalid_response_action: retry
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf sterwerk-enrollment-flow
+      order: 40
+    attrs:
+      stage: !KeyOf stage-redirect
       evaluate_on_plan: true
       re_evaluate_policies: false
       invalid_response_action: retry

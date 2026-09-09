@@ -52,7 +52,10 @@ To invite someone: **Directory > Invitations > Create**, flow
 https://auth.datagiant.org/if/flow/sterwerk-enrollment/?itoken=<token>
 ```
 
-They give a name, their address and a password, and land in Sterwerk logged in.
+They give a name, their address and a password, are logged in, and are redirected
+straight to `https://sterwerk.datagiant.org/`. They do not need access to the
+Authentik portal: the enrollment flow grants only the `sterwerk-users` group,
+which is the access grant for the Sterwerk application.
 Invitations are per-person data and deliberately not repo-managed, like group
 membership.
 
