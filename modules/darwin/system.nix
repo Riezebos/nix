@@ -60,13 +60,14 @@
         # Necessary for using flakes on this system.
         experimental-features = ["nix-command" "flakes"];
 
-        # Cachix is apparently a cache that most people use, but putting it here does not seem to do a lot
-        substituters = ["https://nix-community.cachix.org"];
-        trusted-public-keys = ["nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="];
-        builders-use-substitutes = true;
+        # Keep Determinate Nix's managed FlakeHub cache in `substituters` and
+        # add community caches through `extra-substituters` instead.
         extra-substituters = [
+          "https://nix-community.cachix.org"
           "https://devenv.cachix.org"
         ];
+        trusted-public-keys = ["nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="];
+        builders-use-substitutes = true;
         extra-trusted-public-keys = [
           "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
           "nixpkgs-python.cachix.org-1:hxjI7pFxTyuTHn2NkvWCrAUcNZLNS3ZAvfYNuYifcEU="

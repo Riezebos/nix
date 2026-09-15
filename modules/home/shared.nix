@@ -568,6 +568,7 @@
       LC_ALL = "en_US.UTF-8";
       LANGUAGE = "en_US.UTF-8";
       DO_NOT_TRACK = "1";
+      DD_SITE = "datadoghq.eu";
     };
 
     home.sessionPath = [
@@ -604,6 +605,7 @@
       sops
       age
       ssh-to-age
+      just
     ];
 
     home.file.".ipython/profile_default/ipython_config.py".text = ''
