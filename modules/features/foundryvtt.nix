@@ -63,5 +63,29 @@
     # Relax it; the rest of the hardening (ProtectSystem=strict, syscall
     # filter, CapabilityBoundingSet, PrivateUsers) still applies.
     systemd.services.foundryvtt.serviceConfig.IPAddressAllow = lib.mkForce "any";
+
+    # The upstream module rewrites options.json on every start, discarding a
+    # default world selected in Foundry's setup UI. Append to its preStart so
+    # the newest created installed world is selected after that rewrite.
+    systemd.services.foundryvtt.preStart = lib.mkAfter ''
+      shopt -s nullglob
+      newestWorld=""
+      newestBirth=0
+      for manifest in /var/lib/foundryvtt/v14/Data/worlds/*/world.json; do
+        worldDir="''${manifest%/world.json}"
+        birth="$(${pkgs.coreutils}/bin/stat -c %W "$worldDir")"
+        if (( birth > newestBirth )); then
+          newestBirth="$birth"
+          newestWorld="''${worldDir##*/}"
+        fi
+      done
+
+      if [[ -n "$newestWorld" ]]; then
+        options=/var/lib/foundryvtt/v14/Config/options.json
+        ${pkgs.jq}/bin/jq --arg world "$newestWorld" '.world = $world' "$options" > "$options.tmp"
+        chmod 640 "$options.tmp"
+        mv "$options.tmp" "$options"
+      fi
+    '';
   };
 }

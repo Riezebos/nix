@@ -36,6 +36,9 @@ SSH ports:
 | 2222 | initrd LUKS unlock sshd |
 | 22 | Hetzner rescue mode only |
 
+Use `ssh deploy@foundry` for commands that require `sudo`. The default
+`ssh foundry` login is suitable for unprivileged checks but cannot run sudo.
+
 ## Deploys
 
 Preferred path: merge to `main` and let GitHub Actions deploy through deploy-rs.
@@ -56,6 +59,13 @@ It does not have deploy-rs magic rollback.
 
 ## FoundryVTT upgrades
 
+At each service start, the NixOS module regenerates `Config/options.json`.
+The local Foundry module then selects the installed world whose directory has
+the newest filesystem creation time. The default world selected in Foundry's
+setup UI therefore does not persist across a service restart. To make a newly
+created world the default, create it in Foundry and restart the service with
+`ssh deploy@foundry sudo systemctl restart foundryvtt.service`.
+
 The installer zip is a personal-license file and is not available to GitHub
 Actions. Deploys build on foundry (`remoteBuild = true` in
 `modules/deploy.nix`) precisely so the `requireFile` input resolves against
@@ -65,7 +75,7 @@ To bump the pinned build, seed the new zip first, then update the pin:
 
 ```bash
 scp FoundryVTT-Linux-<version>.zip foundry:/tmp/
-ssh foundry sudo nix-store --add-fixed sha256 /tmp/FoundryVTT-Linux-<version>.zip
+ssh deploy@foundry sudo nix-store --add-fixed sha256 /tmp/FoundryVTT-Linux-<version>.zip
 ssh foundry rm /tmp/FoundryVTT-Linux-<version>.zip
 ```
 
@@ -85,8 +95,8 @@ Basic service checks:
 
 ```bash
 ssh foundry systemctl --failed
-ssh foundry sudo systemctl status foundryvtt caddy authentik-server authentik-worker grafana
-ssh foundry sudo systemctl status victoriametrics loki alloy
+ssh deploy@foundry sudo systemctl status foundryvtt caddy authentik-server authentik-worker grafana
+ssh deploy@foundry sudo systemctl status victoriametrics loki alloy
 ```
 
 Backup timers:
@@ -98,8 +108,8 @@ ssh foundry systemctl list-timers 'restic*' 'postgresqlBackup*'
 Firewall and listening ports:
 
 ```bash
-ssh foundry sudo ss -tulpn
-ssh foundry sudo nft list ruleset
+ssh deploy@foundry sudo ss -tulpn
+ssh deploy@foundry sudo nft list ruleset
 ```
 
 ## Authentik and Grafana
@@ -109,7 +119,7 @@ Grafana uses native OIDC through Authentik.
 The Grafana client secret lives on the server:
 
 ```bash
-ssh foundry sudo cat /var/lib/grafana/secrets/grafana-oidc-client-secret
+ssh deploy@foundry sudo cat /var/lib/grafana/secrets/grafana-oidc-client-secret
 ```
 
 Authentik application/provider values:
@@ -129,11 +139,11 @@ Grafana keeps local login enabled as a break-glass path.
 ## CrowdSec verification
 
 ```bash
-ssh foundry sudo cscli metrics
-ssh foundry sudo cscli acquisitions list
-ssh foundry sudo cscli decisions add --ip 198.51.100.23 --duration 10m --reason manual-test
-ssh foundry sudo nft list ruleset | rg crowdsec
-ssh foundry sudo cscli decisions delete --ip 198.51.100.23
+ssh deploy@foundry sudo cscli metrics
+ssh deploy@foundry sudo cscli acquisitions list
+ssh deploy@foundry sudo cscli decisions add --ip 198.51.100.23 --duration 10m --reason manual-test
+ssh deploy@foundry sudo nft list ruleset | rg crowdsec
+ssh deploy@foundry sudo cscli decisions delete --ip 198.51.100.23
 ```
 
 Expected:
@@ -145,12 +155,12 @@ Expected:
 ## PostgreSQL verification
 
 ```bash
-ssh foundry sudo -u postgres psql -tAc '\l'
-ssh foundry sudo systemctl status pgbouncer.service --no-pager
-ssh foundry sudo ss -tulpn | rg ':6432'
-ssh foundry sudo systemctl status postgresqlBackup.service --no-pager
-ssh foundry sudo ls -lh /var/backup/postgresql
-ssh foundry sudo -u postgres zstd -dc /var/backup/postgresql/all.sql.zstd | head
+ssh deploy@foundry sudo -u postgres psql -tAc '\l'
+ssh deploy@foundry sudo systemctl status pgbouncer.service --no-pager
+ssh deploy@foundry sudo ss -tulpn | rg ':6432'
+ssh deploy@foundry sudo systemctl status postgresqlBackup.service --no-pager
+ssh deploy@foundry sudo ls -lh /var/backup/postgresql
+ssh deploy@foundry sudo -u postgres zstd -dc /var/backup/postgresql/all.sql.zstd | head
 ```
 
 Expected:
@@ -167,15 +177,15 @@ Development sandboxes are managed with the `sandcastle` CLI over SSH. There is
 no web UI; the retired Phoenix launcher is no longer deployed.
 
 ```bash
-ssh foundry sudo sandcastle list
-ssh foundry sudo sandcastle create scratch --packages node python
-ssh foundry sudo sandcastle start scratch
-ssh foundry sudo sandcastle status scratch
+ssh deploy@foundry sudo sandcastle list
+ssh deploy@foundry sudo sandcastle create scratch --packages node python
+ssh deploy@foundry sudo sandcastle start scratch
+ssh deploy@foundry sudo sandcastle status scratch
 ssh -t foundry sudo sandcastle ssh scratch
-ssh foundry sudo sandcastle logs scratch -n 50
-ssh foundry sudo sandcastle rebuild scratch
-ssh foundry sudo sandcastle stop scratch
-ssh foundry sudo sandcastle delete scratch --yes
+ssh deploy@foundry sudo sandcastle logs scratch -n 50
+ssh deploy@foundry sudo sandcastle rebuild scratch
+ssh deploy@foundry sudo sandcastle stop scratch
+ssh deploy@foundry sudo sandcastle delete scratch --yes
 ```
 
 Expected:
