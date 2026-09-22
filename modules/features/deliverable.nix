@@ -12,7 +12,7 @@
     pgbouncerPort = 6432;
     acmeWebroot = "/var/lib/acme/acme-challenge";
     acmeCertDir = config.security.acme.certs.${domain}.directory;
-    deliverableSchemas = ["public" "order_forecaster" "engineers" "analysts" "internal"];
+    deliverableSchemas = ["public" "engineers" "analysts" "internal"];
     deliverableSchemaSqlArray = lib.concatMapStringsSep ", " (s: "'${s}'") deliverableSchemas;
     deliverableSchemaSql =
       lib.concatMapStringsSep "\n" (schema: ''
